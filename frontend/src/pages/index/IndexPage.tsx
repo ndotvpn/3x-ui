@@ -122,7 +122,7 @@ export default function IndexPage() {
     if (panelUpdateInfo.updateAvailable) {
       setPanelUpdateOpen(true);
     } else {
-      window.open('https://github.com/MHSanaei/3x-ui/releases', '_blank', 'noopener,noreferrer');
+      window.open('https://github.com/ndotvpn/3x-ui/releases', '_blank', 'noopener,noreferrer');
     }
   }
 

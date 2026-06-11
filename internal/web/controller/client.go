@@ -132,7 +132,46 @@ func (a *ClientController) create(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), pendingNodeObj(a.inboundService.AnyNodePending(payload.InboundIds)), nil)
+
+	result := gin.H{
+		"inboundIds": payload.InboundIds,
+	}
+	if pending := a.inboundService.AnyNodePending(payload.InboundIds); pending {
+		result["nodePending"] = true
+	}
+
+	rec, lookupErr := a.clientService.GetRecordByEmail(nil, payload.Client.Email)
+	if lookupErr == nil {
+		inboundIds, idsErr := a.clientService.GetInboundIdsForRecord(rec.Id)
+		if idsErr == nil {
+			result["inboundIds"] = inboundIds
+		}
+		flow, flowErr := a.clientService.EffectiveFlow(nil, rec.Id)
+		if flowErr == nil {
+			rec.Flow = flow
+		}
+		result["client"] = rec
+
+		host := resolveHost(c)
+		var configs []map[string]any
+		for _, ibId := range inboundIds {
+			ib, ibErr := a.inboundService.GetInbound(ibId)
+			if ibErr != nil {
+				continue
+			}
+			cfg := buildClientConfig(host, ib, rec)
+			configs = append(configs, cfg)
+		}
+		if len(configs) > 0 {
+			if len(configs) == 1 {
+				result["clientConfig"] = configs[0]
+			} else {
+				result["clientConfigs"] = configs
+			}
+		}
+	}
+
+	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), result, nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
 	}
