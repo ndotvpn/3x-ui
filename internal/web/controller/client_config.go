@@ -34,10 +34,7 @@ func resolveEndpoint(host string, inbound *model.Inbound) (address string, port 
 			First(&rule).Error; err == nil {
 			var master model.Inbound
 			if err := database.GetDB().First(&master, rule.MasterId).Error; err == nil {
-				ma, mp := resolveEndpoint(host, &master)
-			address = ma
-			port = mp
-				port = master.Port
+				address, port = resolveEndpoint(host, &master)
 			}
 		}
 	}
@@ -185,6 +182,15 @@ func buildOutbound(address string, port int, tag string, inbound *model.Inbound,
 			outbound["streamSettings"] = ss
 		}
 	}
+
+	if inbound.Protocol == model.VLESS || inbound.Protocol == model.VMESS ||
+		inbound.Protocol == model.Trojan || inbound.Protocol == model.Shadowsocks {
+		outbound["mux"] = map[string]any{
+			"enabled":     true,
+			"concurrency": 8,
+		}
+	}
+
 	return outbound
 }
 
@@ -381,9 +387,14 @@ func wireGuardSettings(inbound *model.Inbound, client *model.ClientRecord, addre
 		endpoint = net.JoinHostPort(address, itoa(port))
 	}
 
+	addresses := computeWireGuardAddress(settings)
+	if addresses == nil {
+		addresses = []string{}
+	}
+
 	return map[string]any{
 		"secretKey": privateKey,
-		"address":   []string{},
+		"address":   addresses,
 		"peers": []any{
 			map[string]any{
 				"publicKey":  serverPubKey,
@@ -406,6 +417,37 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+func computeWireGuardAddress(settings map[string]any) []string {
+	addrList, _ := settings["address"].([]any)
+	if len(addrList) == 0 {
+		return nil
+	}
+	firstAddr, _ := addrList[0].(string)
+	if firstAddr == "" {
+		return nil
+	}
+	ip, cidr, err := net.ParseCIDR(firstAddr)
+	if err != nil {
+		return nil
+	}
+	ones, _ := cidr.Mask.Size()
+	next := make(net.IP, len(ip))
+	copy(next, ip)
+	ip4 := next.To4()
+	if ip4 != nil {
+		ip4[3]++
+		if !cidr.Contains(ip4) {
+			return nil
+		}
+		return []string{ip4.String() + "/" + itoa(ones)}
+	}
+	next[len(next)-1]++
+	if !cidr.Contains(next) {
+		return nil
+	}
+	return []string{next.String() + "/" + itoa(ones)}
 }
 
 func cleanStreamSettings(ss map[string]any) {

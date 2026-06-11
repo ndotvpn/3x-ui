@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
@@ -146,10 +147,6 @@ func (a *ClientController) create(c *gin.Context) {
 		if idsErr == nil {
 			result["inboundIds"] = inboundIds
 		}
-		flow, flowErr := a.clientService.EffectiveFlow(nil, rec.Id)
-		if flowErr == nil {
-			rec.Flow = flow
-		}
 		result["client"] = rec
 
 		host := resolveHost(c)
@@ -167,6 +164,14 @@ func (a *ClientController) create(c *gin.Context) {
 			if ibErr != nil {
 				continue
 			}
+			// resolve flow per inbound
+			var flowOverride string
+			database.GetDB().Table("client_inbounds").
+				Where("client_id = ? AND inbound_id = ? AND flow_override <> ?", rec.Id, ibId, "").
+				Limit(1).
+				Pluck("flow_override", &flowOverride)
+			rec.Flow = flowOverride
+
 			address, resolvedPort := resolveEndpoint(host, ib)
 			cfg := buildClientConfig(address, resolvedPort, ib, rec, tmplCfg, subOutbounds)
 			configs = append(configs, cfg)
