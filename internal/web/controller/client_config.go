@@ -147,9 +147,25 @@ func buildClientConfig(address string, port int, inbound *model.Inbound, client 
 		}
 	}
 
-	for _, section := range []string{"dns", "policy", "fakedns", "transport", "observatory", "burstObservatory"} {
+	for _, section := range []string{"dns", "policy", "transport"} {
 		if val, ok := tmpl[section]; ok {
 			cfg[section] = val
+		}
+	}
+
+	// Strip server-only monitoring stats from policy
+	if pol, ok := cfg["policy"].(map[string]any); ok {
+		if levels, ok := pol["levels"].(map[string]any); ok {
+			for _, lvl := range levels {
+				if lm, ok := lvl.(map[string]any); ok {
+					delete(lm, "statsUserDownlink")
+					delete(lm, "statsUserUplink")
+				}
+			}
+		}
+		delete(pol, "system")
+		if len(pol) == 0 {
+			delete(cfg, "policy")
 		}
 	}
 
@@ -458,11 +474,57 @@ func cleanStreamSettings(ss map[string]any) {
 			delete(ss, "sockopt")
 		}
 	}
-	if settings, ok := ss["realitySettings"].(map[string]any); ok {
-		if _, hasShortId := settings["shortId"]; !hasShortId {
-			if _, hasServerName := settings["serverName"]; !hasServerName {
-				delete(ss, "realitySettings")
+
+	// Transform realitySettings from server format to client format
+	if rData, ok := ss["realitySettings"].(map[string]any); ok {
+		clientSettings := map[string]any{
+			"show": false,
+		}
+
+		// Lift fields from 3x-ui's nested "settings" sub-object
+		if nested, ok := rData["settings"].(map[string]any); ok {
+			if v, ok := nested["publicKey"].(string); ok && v != "" {
+				clientSettings["publicKey"] = v
+			}
+			if v, ok := nested["fingerprint"].(string); ok && v != "" {
+				clientSettings["fingerprint"] = v
 			}
 		}
+
+		// Pick one shortId from the server's array
+		if shortIds, ok := rData["shortIds"].([]any); ok && len(shortIds) > 0 {
+			if v, _ := shortIds[0].(string); v != "" {
+				clientSettings["shortId"] = v
+			}
+		}
+
+		// Pick one serverName from the server's array
+		if serverNames, ok := rData["serverNames"].([]any); ok && len(serverNames) > 0 {
+			if v, _ := serverNames[0].(string); v != "" {
+				clientSettings["serverName"] = v
+			}
+		}
+
+		// Preserve or default spiderX
+		if v, ok := rData["spiderX"].(string); ok && v != "" {
+			clientSettings["spiderX"] = v
+		} else {
+			clientSettings["spiderX"] = "/"
+		}
+
+		ss["realitySettings"] = clientSettings
+	}
+
+	// Strip server-only TLS certificates
+	if tlsSettings, ok := ss["tlsSettings"].(map[string]any); ok {
+		delete(tlsSettings, "certificates")
+		if len(tlsSettings) == 0 {
+			delete(ss, "tlsSettings")
+		}
+	}
+
+	// Strip irrelevant transport settings per security type
+	if sec, ok := ss["security"].(string); ok && sec == "reality" {
+		delete(ss, "tcpSettings")
 	}
 }
