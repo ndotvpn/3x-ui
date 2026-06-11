@@ -554,7 +554,7 @@ server {
     index index.html;
 
     location /${web_base_path}/ {
-        proxy_pass http://127.0.0.1:${panel_port}/${web_base_path}/;
+        proxy_pass http://127.0.0.1:${panel_port}/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -791,7 +791,7 @@ post_install() {
 
     if "${XUI_FOLDER}/x-ui" setting \
         -port "2053" \
-        -webBasePath "/${web_path}" \
+        -webBasePath "/" \
         -listenIP "127.0.0.1" \
         -username "${admin_user}" \
         -password "${admin_pass}" \
