@@ -522,6 +522,9 @@ setup_decoy() {
 </html>
 DECOYEOF
 
+    if [[ ! -d /usr/share/apache2/icons ]]; then
+        pkg_install apache2-data 2>/dev/null || true
+    fi
     if [[ -d /usr/share/apache2/icons ]]; then
         cp -r /usr/share/apache2/icons "${NGINX_ROOT}/" 2>/dev/null || true
     fi
@@ -540,7 +543,7 @@ setup_nginx() {
     section "nginx — Configuring decoy site + panel reverse proxy on port 80"
 
     mkdir -p /etc/nginx/sites-enabled
-    rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf /etc/nginx/sites-enabled/stealth-http.conf /etc/nginx/sites-enabled/decoy-http.conf /etc/nginx/sites-enabled/panel-proxy.conf 2>/dev/null || true
 
     cat > /etc/nginx/sites-enabled/stealth.conf << NGINXCONF
 server {
@@ -839,7 +842,7 @@ post_install() {
     echo -e "    Password: ${admin_pass}"
     echo ""
     echo -e "  ${cyan}Database:${plain}"
-    echo -e "    SQLite (/etc/x-ui/x-ui.db)"
+    echo -e "    PostgreSQL (via install.sh)"
     echo ""
     echo -e "  ${cyan}Reality (VLESS+REALITY):${plain}"
     echo -e "    Port: 443  |  SNI: ${DOMAIN}"
