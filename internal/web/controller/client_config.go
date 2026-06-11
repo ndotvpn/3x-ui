@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"net"
+	"strings"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
@@ -199,7 +200,7 @@ func buildOutbound(address string, port int, tag string, inbound *model.Inbound,
 		}
 	}
 
-	if client.Flow == "" || client.Flow != "xtls-rprx-vision" {
+	if !strings.HasPrefix(client.Flow, "xtls-") {
 		if inbound.Protocol == model.VLESS || inbound.Protocol == model.VMESS ||
 			inbound.Protocol == model.Trojan || inbound.Protocol == model.Shadowsocks {
 			outbound["mux"] = map[string]any{
