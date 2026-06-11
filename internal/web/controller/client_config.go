@@ -199,11 +199,13 @@ func buildOutbound(address string, port int, tag string, inbound *model.Inbound,
 		}
 	}
 
-	if inbound.Protocol == model.VLESS || inbound.Protocol == model.VMESS ||
-		inbound.Protocol == model.Trojan || inbound.Protocol == model.Shadowsocks {
-		outbound["mux"] = map[string]any{
-			"enabled":     true,
-			"concurrency": 8,
+	if client.Flow == "" || client.Flow != "xtls-rprx-vision" {
+		if inbound.Protocol == model.VLESS || inbound.Protocol == model.VMESS ||
+			inbound.Protocol == model.Trojan || inbound.Protocol == model.Shadowsocks {
+			outbound["mux"] = map[string]any{
+				"enabled":     true,
+				"concurrency": 8,
+			}
 		}
 	}
 
