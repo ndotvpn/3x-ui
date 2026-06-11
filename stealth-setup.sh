@@ -557,7 +557,7 @@ server {
     index index.html;
 
     location /${web_base_path}/ {
-        proxy_pass http://127.0.0.1:${panel_port}/;
+        proxy_pass http://127.0.0.1:${panel_port}/${web_base_path}/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -568,15 +568,6 @@ server {
         proxy_buffering off;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-    }
-
-    location /assets/ {
-        proxy_pass http://127.0.0.1:${panel_port};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     location / {
@@ -803,7 +794,7 @@ post_install() {
 
     if "${XUI_FOLDER}/x-ui" setting \
         -port "2053" \
-        -webBasePath "/" \
+        -webBasePath "/${web_path}" \
         -listenIP "127.0.0.1" \
         -username "${admin_user}" \
         -password "${admin_pass}" \
