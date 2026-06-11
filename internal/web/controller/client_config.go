@@ -148,10 +148,22 @@ func buildClientConfig(address string, port int, inbound *model.Inbound, client 
 		}
 	}
 
-	for _, section := range []string{"dns", "policy", "transport"} {
-		if val, ok := tmpl[section]; ok {
-			cfg[section] = val
+	serverOnlySections := map[string]bool{
+		"api":     true,
+		"stats":   true,
+		"metrics": true,
+	}
+	handledSections := map[string]bool{
+		"log":       true,
+		"inbounds":  true,
+		"outbounds": true,
+		"routing":   true,
+	}
+	for key, val := range tmpl {
+		if handledSections[key] || serverOnlySections[key] {
+			continue
 		}
+		cfg[key] = val
 	}
 
 	// Strip server-only monitoring stats from policy
@@ -207,6 +219,25 @@ func buildOutbound(address string, port int, tag string, inbound *model.Inbound,
 				"enabled":     true,
 				"concurrency": 8,
 			}
+		}
+	}
+
+	if inbound.Protocol == model.Hysteria {
+		ss, ok := outbound["streamSettings"].(map[string]any)
+		if !ok {
+			ss = map[string]any{}
+			outbound["streamSettings"] = ss
+		}
+		ss["network"] = "hysteria"
+		var hs map[string]any
+		if h, ok := ss["hysteriaSettings"].(map[string]any); ok {
+			hs = h
+		} else {
+			hs = map[string]any{}
+			ss["hysteriaSettings"] = hs
+		}
+		if client.Auth != "" {
+			hs["auth"] = client.Auth
 		}
 	}
 
@@ -348,21 +379,17 @@ func hysteriaSettings(inbound *model.Inbound, client *model.ClientRecord, addres
 	if v, ok := ss["version"].(float64); ok {
 		version = v
 	}
-	if version >= 2 {
-		return map[string]any{
-			"server":   address,
-			"port":     port,
-			"password": client.Auth,
+	if version == 0 {
+		if hs, ok := ss["hysteriaSettings"].(map[string]any); ok {
+			if v, ok := hs["version"].(float64); ok {
+				version = v
+			}
 		}
 	}
 	return map[string]any{
-		"servers": []any{
-			map[string]any{
-				"address":  address,
-				"port":     port,
-				"password": client.Auth,
-			},
-		},
+		"version": version,
+		"address": address,
+		"port":    port,
 	}
 }
 
@@ -480,14 +507,12 @@ func cleanStreamSettings(ss map[string]any) {
 
 	// Transform realitySettings from server format to client format
 	if rData, ok := ss["realitySettings"].(map[string]any); ok {
-		clientSettings := map[string]any{
-			"show": false,
-		}
+		clientSettings := map[string]any{}
 
 		// Lift fields from 3x-ui's nested "settings" sub-object
 		if nested, ok := rData["settings"].(map[string]any); ok {
 			if v, ok := nested["publicKey"].(string); ok && v != "" {
-				clientSettings["publicKey"] = v
+				clientSettings["password"] = v
 			}
 			if v, ok := nested["fingerprint"].(string); ok && v != "" {
 				clientSettings["fingerprint"] = v
