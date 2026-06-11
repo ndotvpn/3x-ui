@@ -165,12 +165,15 @@ func (a *ClientController) create(c *gin.Context) {
 				continue
 			}
 			// resolve flow per inbound
+			rec.Flow = ""
 			var flowOverride string
 			database.GetDB().Table("client_inbounds").
 				Where("client_id = ? AND inbound_id = ? AND flow_override <> ?", rec.Id, ibId, "").
 				Limit(1).
 				Pluck("flow_override", &flowOverride)
-			rec.Flow = flowOverride
+			if flowOverride != "" {
+				rec.Flow = flowOverride
+			}
 
 			address, resolvedPort := resolveEndpoint(host, ib)
 			cfg := buildClientConfig(address, resolvedPort, ib, rec, tmplCfg, subOutbounds)
