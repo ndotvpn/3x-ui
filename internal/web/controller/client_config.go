@@ -7,40 +7,101 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 )
 
-func buildClientConfig(host string, inbound *model.Inbound, client *model.ClientRecord) map[string]any {
-	address := clientAddress(host, inbound)
-	port := inbound.Port
+var clientInboundTags = map[string]bool{
+	"api":          true,
+	"metrics_out":  true,
+	"metrics-in":   true,
+	"panel-egress": true,
+}
 
-	cfg := map[string]any{
-		"log": map[string]any{
-			"loglevel": "warning",
-		},
-		"inbounds": []any{
-			map[string]any{
-				"tag":      "socks-in",
-				"port":     10808,
-				"listen":   "127.0.0.1",
-				"protocol": "socks",
-				"settings": map[string]any{
-					"auth": "noauth",
-					"udp":  true,
-				},
-			},
-		},
-		"outbounds": []any{
-			buildOutbound(address, port, inbound, client),
-		},
-		"routing": map[string]any{
-			"domainStrategy": "AsIs",
-			"rules": []any{
-				map[string]any{
-					"type":        "field",
-					"inboundTag":  []string{"socks-in"},
-					"outboundTag": "proxy",
-				},
+func buildClientConfig(host string, inbound *model.Inbound, client *model.ClientRecord, templateJSON string) map[string]any {
+	address := clientAddress(host, inbound)
+
+	var tmpl map[string]any
+	json.Unmarshal([]byte(templateJSON), &tmpl)
+
+	proxyOutbound := buildOutbound(address, inbound.Port, inbound, client)
+
+	cfg := make(map[string]any)
+
+	if log, ok := tmpl["log"]; ok {
+		cfg["log"] = log
+	} else {
+		cfg["log"] = map[string]any{"loglevel": "warning"}
+	}
+
+	cfg["inbounds"] = []any{
+		map[string]any{
+			"tag":      "socks-in",
+			"port":     10808,
+			"listen":   "127.0.0.1",
+			"protocol": "socks",
+			"settings": map[string]any{
+				"auth": "noauth",
+				"udp":  true,
 			},
 		},
 	}
+
+		var outbounds []any
+	outbounds = append(outbounds, proxyOutbound)
+	if tmplOutbounds, ok := tmpl["outbounds"].([]any); ok {
+		for _, ob := range tmplOutbounds {
+			obMap, _ := ob.(map[string]any)
+			if obMap == nil {
+				continue
+			}
+			tag, _ := obMap["tag"].(string)
+			if tag == "" || clientInboundTags[tag] || tag == "proxy" {
+				continue
+			}
+			outbounds = append(outbounds, ob)
+		}
+	}
+	cfg["outbounds"] = outbounds
+
+	var rules []any
+	if tmplRouting, ok := tmpl["routing"].(map[string]any); ok {
+		dmnStrategy, _ := tmplRouting["domainStrategy"].(string)
+		if dmnStrategy == "" {
+			dmnStrategy = "AsIs"
+		}
+		if tmplRules, ok := tmplRouting["rules"].([]any); ok {
+			for _, r := range tmplRules {
+				rMap, _ := r.(map[string]any)
+				if rMap == nil {
+					continue
+				}
+				inboundTags, _ := rMap["inboundTag"].([]any)
+				skip := false
+				for _, t := range inboundTags {
+					if tagStr, ok := t.(string); ok && clientInboundTags[tagStr] {
+						skip = true
+						break
+					}
+				}
+				if !skip {
+					rules = append(rules, r)
+				}
+			}
+		}
+		cfg["routing"] = map[string]any{
+			"domainStrategy": dmnStrategy,
+			"rules":          rules,
+		}
+	} else {
+		cfg["routing"] = map[string]any{
+			"domainStrategy": "AsIs",
+			"rules":          rules,
+		}
+	}
+
+	for _, section := range []string{"dns", "policy", "fakedns", "transport", "observatory", "burstObservatory"} {
+		if val, ok := tmpl[section]; ok {
+			cfg[section] = val
+		}
+	}
+
 	return cfg
 }
 
@@ -278,5 +339,3 @@ func cleanStreamSettings(ss map[string]any) {
 		}
 	}
 }
-
-

@@ -153,13 +153,14 @@ func (a *ClientController) create(c *gin.Context) {
 		result["client"] = rec
 
 		host := resolveHost(c)
+		tmplCfg, _ := a.settingService.GetXrayConfigTemplate()
 		var configs []map[string]any
 		for _, ibId := range inboundIds {
 			ib, ibErr := a.inboundService.GetInbound(ibId)
 			if ibErr != nil {
 				continue
 			}
-			cfg := buildClientConfig(host, ib, rec)
+			cfg := buildClientConfig(host, ib, rec, tmplCfg)
 			configs = append(configs, cfg)
 		}
 		if len(configs) > 0 {
