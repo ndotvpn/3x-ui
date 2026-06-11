@@ -196,85 +196,333 @@ setup_firewall() {
 # 3. Decoy website
 # ──────────────────────────────────────────────
 setup_decoy() {
-    section "Decoy Website — Apache2 Ubuntu default page (convincing decoy)"
+    section "Decoy Website — Official Apache2 Ubuntu default page"
 
     local domain="$1"
     mkdir -p "$NGINX_ROOT"
 
     cat > "${NGINX_ROOT}/index.html" << 'DECOYEOF'
-<!DOCTYPE html>
-<html>
-<head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-<title>Apache2 Ubuntu Default Page: It works</title>
-<style>
-  html *, html { padding:0; margin:0; }
-  body { font-family: 'Ubuntu', 'DejaVu Sans', sans-serif; font-size: 14px; line-height: 1.6; color: #2c3e50; background: #f4f4f4; }
-  a { color: #e95420; text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
-  h1 { font-size: 28px; color: #e95420; margin-bottom: 20px; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
-  h2 { font-size: 20px; color: #333; margin: 30px 0 10px; }
-  p { margin-bottom: 15px; }
-  ul { margin: 10px 0 20px 20px; }
-  li { margin-bottom: 5px; }
-  .logo { text-align: center; margin-bottom: 30px; }
-  .logo img { max-width: 200px; }
-  .box { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 30px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-  .header-box { background: #2c3e50; color: #fff; padding: 30px; border-radius: 4px 4px 0 0; margin-bottom: 0; }
-  .header-box h1 { color: #fff; border: none; font-size: 24px; margin-bottom: 5px; padding-bottom: 0; }
-  .header-box p { color: #bdc3c7; font-size: 14px; margin-bottom: 0; }
-  .footer { text-align: center; color: #7f8c8d; font-size: 12px; border-top: 1px solid #ddd; padding-top: 20px; margin-top: 30px; }
-  code { background: #ecf0f1; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
-  .highlight { background: #fff9e6; border-left: 4px solid #e95420; padding: 10px 15px; margin: 15px 0; }
-</style>
-</head>
-<body>
-<div class="container">
-<div class="box" style="padding:0;">
-<div class="header-box">
-<h1>Apache2 Ubuntu Default Page</h1>
-<p>It works!</p>
-</div>
-<div style="padding:30px;">
-<p>This is the default welcome page used to test the correct operation of the <strong>Apache2</strong> server after installation on <strong>Ubuntu</strong> systems. It is based on the equivalent page on <strong>Debian</strong>, from which the Ubuntu Apache packaging is derived. If you can read this page, it means the Apache HTTP server installed at this site is working properly. You should <strong>replace this file</strong> (located at <code>/var/www/html/index.html</code>) before continuing to operate your HTTP server.</p>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>Apache2 Ubuntu Default Page: It works</title>
+    <style type="text/css" media="screen">
+  * {
+    margin: 0px 0px 0px 0px;
+    padding: 0px 0px 0px 0px;
+  }
 
-<div class="highlight">
-<p><strong>If you are a normal user of this web site and don't know what this page is about, this probably means that the site is currently unavailable due to maintenance.</strong> If the problem persists, please contact the site's administrator.</p>
-</div>
+  body, html {
+    padding: 3px 3px 3px 3px;
+    background-color: #D8DBE2;
+    font-family: Ubuntu, Verdana, sans-serif;
+    font-size: 11pt;
+    text-align: center;
+  }
 
-<h2>Configuration Overview</h2>
-<p>Ubuntu's Apache2 default configuration is different from the upstream default configuration, and splits into several files optimized for interaction with Ubuntu tools. The configuration system is <strong>fully documented in /usr/share/doc/apache2/README.Debian.gz</strong>. Refer to this for the full documentation. Documentation for the web server itself can be found by accessing the <a href="https://httpd.apache.org/docs/">Apache HTTP Server documentation</a>.</p>
+  div.main_page {
+    position: relative;
+    display: table;
+    width: 800px;
+    margin-bottom: 3px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0px 0px 0px 0px;
+    border-width: 2px;
+    border-color: #212738;
+    border-style: solid;
+    background-color: #FFFFFF;
+    text-align: center;
+  }
 
-<h2>Documentation</h2>
-<ul>
-<li>Apache2 Documentation: <a href="https://httpd.apache.org/docs/">https://httpd.apache.org/docs/</a></li>
-<li>Ubuntu Wiki Apache2: <a href="https://wiki.ubuntu.com/Apache2">https://wiki.ubuntu.com/Apache2</a></li>
-</ul>
+  div.page_header {
+    height: 180px;
+    width: 100%;
+    background-color: #F5F6F7;
+  }
 
-<h2>Where to find help</h2>
-<ul>
-<li>Ask Ubuntu: <a href="https://askubuntu.com/">https://askubuntu.com/</a></li>
-<li>Server Fault: <a href="https://serverfault.com/">https://serverfault.com/</a></li>
-<li>Ubuntu Forums: <a href="https://ubuntuforums.org/">https://ubuntuforums.org/</a></li>
-</ul>
+  div.page_header span {
+    margin: 15px 0px 0px 50px;
+    font-size: 180%;
+    font-weight: bold;
+  }
 
-<hr style="border:none;border-top:1px solid #eee;margin:25px 0;">
+  div.page_header img {
+    margin: 3px 0px 0px 40px;
+    border: 0px 0px 0px;
+  }
 
-<p style="color:#7f8c8d;font-size:12px;">Ubuntu 22.04 LTS - Apache/2.4.57 (Ubuntu) - Server at DOMAIN_PLACEHOLDER Port 80</p>
-</div>
-</div>
-<div class="footer">
-<p>Apache/2.4.57 (Ubuntu) Server at DOMAIN_PLACEHOLDER Port 80</p>
-</div>
-</div>
-</body>
+  div.banner {
+    padding: 9px 6px 9px 6px;
+    background-color: #E9510E;
+    color: #FFFFFF;
+    font-weight: bold;
+    font-size: 112%;
+    text-align: center;
+    position: absolute;
+    left: 40%;
+    bottom: 30px;
+    width: 20%;
+  }
+
+  div.table_of_contents {
+    clear: left;
+    min-width: 200px;
+    margin: 3px 3px 3px 3px;
+    background-color: #FFFFFF;
+    text-align: left;
+  }
+
+  div.table_of_contents_item {
+    clear: left;
+    width: 100%;
+    margin: 4px 0px 0px 0px;
+    background-color: #FFFFFF;
+    color: #000000;
+    text-align: left;
+  }
+
+  div.table_of_contents_item a {
+    margin: 6px 0px 0px 6px;
+  }
+
+  div.content_section {
+    margin: 3px 3px 3px 3px;
+    background-color: #FFFFFF;
+    text-align: left;
+  }
+
+  div.content_section_text {
+    padding: 4px 8px 4px 8px;
+    color: #000000;
+    font-size: 100%;
+  }
+
+  div.content_section_text pre {
+    margin: 8px 0px 8px 0px;
+    padding: 8px 8px 8px 8px;
+    border-width: 1px;
+    border-style: dotted;
+    border-color: #000000;
+    background-color: #F5F6F7;
+    font-style: italic;
+  }
+
+  div.content_section_text p {
+    margin-bottom: 6px;
+  }
+
+  div.content_section_text ul, div.content_section_text li {
+    padding: 4px 8px 4px 16px;
+  }
+
+  div.section_header {
+    padding: 3px 6px 3px 6px;
+    background-color: #8E9CB2;
+    color: #FFFFFF;
+    font-weight: bold;
+    font-size: 112%;
+    text-align: center;
+  }
+
+  div.section_header_grey {
+    background-color: #9F9386;
+  }
+
+  .floating_element {
+    position: relative;
+    float: left;
+  }
+
+  div.table_of_contents_item a,
+  div.content_section_text a {
+    text-decoration: none;
+    font-weight: bold;
+  }
+
+  div.table_of_contents_item a:link,
+  div.table_of_contents_item a:visited,
+  div.table_of_contents_item a:active {
+    color: #000000;
+  }
+
+  div.table_of_contents_item a:hover {
+    background-color: #000000;
+    color: #FFFFFF;
+  }
+
+  div.content_section_text a:link,
+  div.content_section_text a:visited,
+   div.content_section_text a:active {
+    background-color: #DCDFE6;
+    color: #000000;
+  }
+
+  div.content_section_text a:hover {
+    background-color: #000000;
+    color: #DCDFE6;
+  }
+
+  div.validator {
+  }
+    </style>
+  </head>
+  <body>
+    <div class="main_page">
+      <div class="page_header floating_element">
+        <img src="/icons/ubuntu-logo.png" alt="Ubuntu Logo"
+             style="width:184px;height:146px;" class="floating_element" />
+        <div>
+          <span style="margin-top: 1.5em;" class="floating_element">
+            Apache2 Default Page
+          </span>
+        </div>
+        <div class="banner">
+          <div id="about"></div>
+          It works!
+        </div>
+      </div>
+      <div class="content_section floating_element">
+        <div class="content_section_text">
+          <p>
+                This is the default welcome page used to test the correct
+                operation of the Apache2 server after installation on Ubuntu systems.
+                It is based on the equivalent page on Debian, from which the Ubuntu Apache
+                packaging is derived.
+                If you can read this page, it means that the Apache HTTP server installed at
+                this site is working properly. You should <b>replace this file</b> (located at
+                <tt>/var/www/html/index.html</tt>) before continuing to operate your HTTP server.
+          </p>
+          <p>
+                If you are a normal user of this web site and don't know what this page is
+                about, this probably means that the site is currently unavailable due to
+                maintenance.
+                If the problem persists, please contact the site's administrator.
+          </p>
+        </div>
+        <div class="section_header">
+          <div id="changes"></div>
+                Configuration Overview
+        </div>
+        <div class="content_section_text">
+          <p>
+                Ubuntu's Apache2 default configuration is different from the
+                upstream default configuration, and split into several files optimized for
+                interaction with Ubuntu tools. The configuration system is
+                <b>fully documented in
+                /usr/share/doc/apache2/README.Debian.gz</b>. Refer to this for the full
+                documentation. Documentation for the web server itself can be
+                found by accessing the <a href="/manual">manual</a> if the <tt>apache2-doc</tt>
+                package was installed on this server.
+          </p>
+          <p>
+                The configuration layout for an Apache2 web server installation on Ubuntu systems is as follows:
+          </p>
+          <pre>
+/etc/apache2/
+|-- apache2.conf
+|       `--  ports.conf
+|-- mods-enabled
+|       |-- *.load
+|       `-- *.conf
+|-- conf-enabled
+|       `-- *.conf
+|-- sites-enabled
+|       `-- *.conf
+          </pre>
+          <ul>
+                        <li>
+                           <tt>apache2.conf</tt> is the main configuration
+                           file. It puts the pieces together by including all remaining configuration
+                           files when starting up the web server.
+                        </li>
+                        <li>
+                           <tt>ports.conf</tt> is always included from the
+                           main configuration file. It is used to determine the listening ports for
+                           incoming connections, and this file can be customized anytime.
+                        </li>
+                        <li>
+                           Configuration files in the <tt>mods-enabled/</tt>,
+                           <tt>conf-enabled/</tt> and <tt>sites-enabled/</tt> directories contain
+                           particular configuration snippets which manage modules, global configuration
+                           fragments, or virtual host configurations, respectively.
+                        </li>
+                        <li>
+                           They are activated by symlinking available
+                           configuration files from their respective
+                           *-available/ counterparts. These should be managed
+                           by using our helpers
+                           <tt>
+                                a2enmod,
+                                a2dismod,
+                           </tt>
+                           <tt>
+                                a2ensite,
+                                a2dissite,
+                            </tt>
+                                and
+                           <tt>
+                                a2enconf,
+                                a2disconf
+                           </tt>. See their respective man pages for detailed information.
+                        </li>
+                        <li>
+                           The binary is called apache2 and is managed using systemd, so to
+                           start/stop the service use <tt>systemctl start apache2</tt> and
+                           <tt>systemctl stop apache2</tt>, and use <tt>systemctl status apache2</tt>
+                           and <tt>journalctl -u apache2</tt> to check status.  <tt>system</tt>
+                           and <tt>apache2ctl</tt> can also be used for service management if
+                           desired.
+                           <b>Calling <tt>/usr/bin/apache2</tt> directly will not work</b> with the
+                           default configuration.
+                        </li>
+          </ul>
+        </div>
+        <div class="section_header">
+            <div id="docroot"></div>
+                Document Roots
+        </div>
+        <div class="content_section_text">
+            <p>
+                By default, Ubuntu does not allow access through the web browser to
+                <em>any</em> file outside of those located in <tt>/var/www</tt>,
+                <a href="http://httpd.apache.org/docs/2.4/mod/mod_userdir.html" rel="nofollow">public_html</a>
+                directories (when enabled) and <tt>/usr/share</tt> (for web
+                applications). If your site is using a web document root
+                located elsewhere (such as in <tt>/srv</tt>) you may need to whitelist your
+                document root directory in <tt>/etc/apache2/apache2.conf</tt>.
+            </p>
+            <p>
+                The default Ubuntu document root is <tt>/var/www/html</tt>. You
+                can make your own virtual hosts under /var/www.
+            </p>
+        </div>
+        <div class="section_header">
+          <div id="bugs"></div>
+                Reporting Problems
+        </div>
+        <div class="content_section_text">
+          <p>
+                Please use the <tt>ubuntu-bug</tt> tool to report bugs in the
+                Apache2 package with Ubuntu. However, check <a
+                href="https://bugs.launchpad.net/ubuntu/+source/apache2"
+                rel="nofollow">existing bug reports</a> before reporting a new bug.
+          </p>
+          <p>
+                Please report bugs specific to modules (such as PHP and others)
+                to their respective packages, not to the web server itself.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="validator">
+    </div>
+  </body>
 </html>
 DECOYEOF
 
-    sed -i "s/DOMAIN_PLACEHOLDER/${domain}/g" "${NGINX_ROOT}/index.html"
-
-    info "Decoy — Apache2 Ubuntu default page created at ${NGINX_ROOT}"
+    info "Decoy — Official Apache2 Ubuntu default page created at ${NGINX_ROOT}"
 }
 
 # ──────────────────────────────────────────────
@@ -302,7 +550,7 @@ server {
     index index.html;
 
     location /${web_base_path}/ {
-        proxy_pass http://127.0.0.1:${panel_port}/;
+        proxy_pass http://127.0.0.1:${panel_port}/${web_base_path}/;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -501,7 +749,8 @@ cleanup_existing_xui() {
             rm -f /etc/systemd/system/x-ui.service 2>/dev/null || true
             systemctl daemon-reload 2>/dev/null || true
         fi
-        rm -rf /usr/local/x-ui /etc/x-ui /var/log/x-ui /usr/bin/x-ui /etc/default/x-ui /etc/conf.d/x-ui /etc/sysconfig/x-ui 2>/dev/null || true
+        rm -rf /usr/local/x-ui /etc/x-ui /var/log/x-ui /usr/bin/x-ui /etc/default/x-ui /etc/conf.d/x-ui /etc/sysconfig/x-ui /etc/systemd/system/x-ui.service.d 2>/dev/null || true
+        rm -f /etc/nginx/sites-enabled/decoy-http.conf /etc/nginx/sites-enabled/panel-proxy.conf /etc/nginx/sites-enabled/stealth-http.conf 2>/dev/null || true
         info "Old x-ui removed"
     else
         info "No existing x-ui found"
@@ -661,7 +910,7 @@ main() {
     # Write initial nginx site config for port 80 (decoy only for now)
     info "Writing initial nginx site config (port 80 decoy)..."
     mkdir -p /etc/nginx/sites-enabled /var/log/nginx
-    rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf 2>/dev/null || true
+    rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf /etc/nginx/sites-enabled/decoy-http.conf /etc/nginx/sites-enabled/panel-proxy.conf /etc/nginx/sites-enabled/stealth-http.conf 2>/dev/null || true
 
     cat > /etc/nginx/sites-enabled/stealth-http.conf << 'HTTPMIN'
 server {
