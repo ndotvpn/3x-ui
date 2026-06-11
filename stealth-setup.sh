@@ -2,12 +2,6 @@
 
 set -euo pipefail
 
-# Self-update: if running from a local file, delete it and re-exec from GitHub
-if [[ -n "${BASH_SOURCE[0]-}" ]] && [[ -f "${BASH_SOURCE[0]}" ]] && [[ ! "${BASH_SOURCE[0]}" =~ /proc/self/fd/ ]]; then
-    rm -f "${BASH_SOURCE[0]}"
-    exec bash <(curl -fsSL "https://raw.githubusercontent.com/ndotvpn/3x-ui/master/stealth-setup.sh")
-fi
-
 # =============================================================================
 #  3x-ui Stealth Setup Wrapper
 #  Hardens server, sets up nginx decoy, fail2ban, firewall, SSL,
@@ -514,85 +508,7 @@ cleanup_existing_xui() {
     fi
 }
 
-# ──────────────────────────────────────────────
-# 9c. Install & configure local PostgreSQL
-# ──────────────────────────────────────────────
-setup_postgres() {
-    section "PostgreSQL — Installing and creating database"
 
-    pkg_install postgresql
-
-    local pg_data_dir=""
-    case "${release}" in
-        ubuntu|debian|armbian) pg_data_dir="/var/lib/postgresql" ;;
-        fedora|amzn|rhel|almalinux|rocky|ol|centos) pg_data_dir="/var/lib/pgsql" ;;
-        arch|manjaro|parch) pg_data_dir="/var/lib/postgres" ;;
-        *) pg_data_dir="/var/lib/postgresql" ;;
-    esac
-
-    if [[ $release == "alpine" ]]; then
-        rc-service postgresql start 2>/dev/null || /etc/init.d/postgresql setup 2>/dev/null || true
-        rc-update add postgresql default 2>/dev/null || true
-    else
-        systemctl enable --now postgresql 2>/dev/null || true
-    fi
-
-    local i
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-        sudo -u postgres psql -tAc 'SELECT 1' > /dev/null 2>&1 && break
-        sleep 1
-    done
-
-    PG_USER="xui_$(gen_random_string 6)"
-    PG_PASS=$(gen_random_string 24)
-    PG_DB="xui"
-    PG_HOST="127.0.0.1"
-    PG_PORT="5432"
-
-    sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'" 2>/dev/null | grep -q 1 \
-        || sudo -u postgres psql -c "CREATE USER \"${PG_USER}\" WITH PASSWORD '${PG_PASS}';" >/dev/null 2>&1 || true
-
-    # Always drop and recreate for a clean start (avoids GORM migration errors)
-    sudo -u postgres psql -c "DROP DATABASE IF EXISTS \"${PG_DB}\";" >/dev/null 2>&1 || true
-    sudo -u postgres psql -c "CREATE DATABASE \"${PG_DB}\" OWNER \"${PG_USER}\";" >/dev/null 2>&1 || true
-
-    sudo -u postgres psql -c "ALTER USER \"${PG_USER}\" WITH PASSWORD '${PG_PASS}';" >/dev/null 2>&1 || true
-
-    local pg_pass_enc
-    pg_pass_enc=$(printf '%s' "${PG_PASS}" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's/@/%40/g' -e 's|/|%2F|g' -e 's/?/%3F/g' -e 's/#/%23/g')
-
-    PG_DSN="postgres://${PG_USER}:${pg_pass_enc}@${PG_HOST}:${PG_PORT}/${PG_DB}?sslmode=disable"
-    info "PostgreSQL ready: ${PG_USER}@${PG_HOST}:${PG_PORT}/${PG_DB}"
-}
-
-# ──────────────────────────────────────────────
-# 10. Write PG env file for install.sh
-# ──────────────────────────────────────────────
-setup_env_file() {
-    section "Writing PostgreSQL env file for x-ui"
-
-    mkdir -p /etc/x-ui
-
-    local xui_env_file
-    case "${release}" in
-        ubuntu|debian|armbian) xui_env_file="/etc/default/x-ui" ;;
-        arch|manjaro|parch|alpine) xui_env_file="/etc/conf.d/x-ui" ;;
-        *) xui_env_file="/etc/sysconfig/x-ui" ;;
-    esac
-
-    mkdir -p "$(dirname "$xui_env_file")"
-    umask 077
-    cat > "$xui_env_file" << EOF
-XUI_DB_TYPE=postgres
-XUI_DB_DSN=${PG_DSN}
-EOF
-    chmod 600 "$xui_env_file"
-    umask 022
-
-    export XUI_DB_TYPE=postgres
-    export XUI_DB_DSN="${PG_DSN}"
-    info "PostgreSQL env file written: ${xui_env_file}"
-}
 
 post_install() {
     section "Post-Install — Configuring panel + nginx"
@@ -606,30 +522,9 @@ post_install() {
         error "x-ui binary not found at ${XUI_FOLDER}"; return 1
     fi
 
-    # Source env file (install.sh may have updated PG password)
-    local XUI_ENV_FILE
-    case "${release}" in
-        ubuntu|debian|armbian) XUI_ENV_FILE="/etc/default/x-ui" ;;
-        arch|manjaro|parch|alpine) XUI_ENV_FILE="/etc/conf.d/x-ui" ;;
-        *) XUI_ENV_FILE="/etc/sysconfig/x-ui" ;;
-    esac
-    [[ -f "$XUI_ENV_FILE" ]] && . "$XUI_ENV_FILE" || true
-
-    # Parse DB name from DSN
-    local DB_NAME
-    DB_NAME="${XUI_DB_DSN##*/}"
-    DB_NAME="${DB_NAME%%\?*}"
-
     systemctl stop x-ui 2>/dev/null || true
     sleep 1
 
-    # Clean PG schema so x-ui starts fresh
-    sudo -u postgres psql -d "${DB_NAME}" \
-        -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
-        >/dev/null 2>&1 || true
-    sleep 1
-
-    # Generate random settings for the panel
     local web_path
     web_path=$(gen_random_string 18)
     local admin_user
@@ -641,7 +536,6 @@ post_install() {
     PANEL_USER="${admin_user}"
     PANEL_PASS="${admin_pass}"
 
-    # ONE call creates tables AND applies settings
     if "${XUI_FOLDER}/x-ui" setting \
         -port "2053" \
         -webBasePath "/${web_path}" \
@@ -649,84 +543,14 @@ post_install() {
         -username "${admin_user}" \
         -password "${admin_pass}" \
         >/dev/null 2>&1; then
-        info "Panel settings applied (tables created)"
+        info "Panel settings applied"
     else
-        warn "x-ui setting had errors — trying direct SQL fallback"
+        warn "x-ui setting had errors"
     fi
 
-    # Save password hash and settings for systemd wrapper
-    local hash_file="/etc/x-ui/.pg-password-hash"
-    sudo -u postgres psql -d "${DB_NAME}" -tAc \
-        "SELECT password FROM users ORDER BY id LIMIT 1;" \
-        > "${hash_file}" 2>/dev/null || true
-    chmod 600 "${hash_file}" 2>/dev/null || true
-
-    local sql_file="/etc/x-ui/.pg-settings.sql"
-    cat > "${sql_file}" << PGSQL
-DELETE FROM settings;
-INSERT INTO settings (key, value) VALUES ('webPort', '2053');
-INSERT INTO settings (key, value) VALUES ('webBasePath', '/${web_path}');
-INSERT INTO settings (key, value) VALUES ('webListen', '127.0.0.1');
-PGSQL
-    chmod 600 "${sql_file}"
-
-    # Create PG cleanup + apply scripts for systemd drop-in
-    mkdir -p /usr/local/x-ui
-    cat > /usr/local/x-ui/clean-pg.sh << 'CLEANSH'
-#!/bin/bash
-. /etc/default/x-ui 2>/dev/null || true
-DB_NAME="${XUI_DB_DSN##*/}"
-DB_NAME="${DB_NAME%%\?*}"
-sudo -u postgres psql -d "${DB_NAME:-xui}" \
-    -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
-    2>/dev/null || true
-CLEANSH
-    chmod +x /usr/local/x-ui/clean-pg.sh
-
-    cat > /usr/local/x-ui/apply-pg.sh << 'APPLYSH'
-#!/bin/bash
-. /etc/default/x-ui 2>/dev/null || true
-DB_NAME="${XUI_DB_DSN##*/}"
-DB_NAME="${DB_NAME%%\?*}"
-DB_NAME="${DB_NAME:-xui}"
-for i in $(seq 1 30); do
-    if sudo -u postgres psql -d "$DB_NAME" -tAc \
-        "SELECT 1 FROM pg_tables WHERE tablename='users';" 2>/dev/null | grep -q 1; then
-        break
-    fi
-    sleep 1
-done
-SF=/etc/x-ui/.pg-settings.sql
-if [[ -f "$SF" ]]; then
-    sudo -u postgres psql -d "$DB_NAME" -f "$SF" 2>/dev/null || true
-fi
-HF=/etc/x-ui/.pg-password-hash
-if [[ -f "$HF" ]]; then
-    H=$(cat "$HF")
-    sudo -u postgres psql -d "$DB_NAME" \
-        -c "UPDATE users SET password='${H}' WHERE username='admin';" \
-        2>/dev/null || true
-fi
-APPLYSH
-    chmod +x /usr/local/x-ui/apply-pg.sh
-
-    # Systemd drop-in — does NOT modify the original x-ui.service
-    # Original file stays untouched; only our overrides apply
-    mkdir -p /etc/systemd/system/x-ui.service.d
-    cat > /etc/systemd/system/x-ui.service.d/stealth.conf << DROPIN
-[Service]
-ExecStartPre=/usr/local/x-ui/clean-pg.sh
-ExecStartPost=/usr/local/x-ui/apply-pg.sh
-DROPIN
-    systemctl daemon-reload
-    info "Systemd drop-in created — original x-ui.service unchanged"
-
-    # Start x-ui (ExecStartPre cleans PG first, ExecStartPost re-applies settings)
     systemctl start x-ui 2>/dev/null || true
     sleep 3
 
-    # Configure nginx on port 80 only (decoy + panel, no SSL)
-    info "Configuring nginx..."
     setup_nginx "${DOMAIN}" "2053" "${web_path}"
     systemctl restart nginx 2>/dev/null || true
     info "nginx serving decoy at / and panel at /${web_path}/"
@@ -735,7 +559,6 @@ DROPIN
         ufw reload 2>/dev/null || true
     fi
 
-    # ── Summary ───────────────────────────────────────────────────
     echo ""
     echo -e "${green}══════════════════════════════════════════════════════════════${plain}"
     echo -e "${green}     STEALTH SETUP COMPLETE                                  ${plain}"
@@ -745,7 +568,6 @@ DROPIN
     echo ""
     echo -e "  ${cyan}Decoy Website:${plain}"
     echo -e "    http://${SERVER_IP}  →  Apache2 Ubuntu Default Page"
-    echo -e "    (Reality on 443 forwards non-proxy traffic to ${DOMAIN}:443)"
     echo ""
     echo -e "  ${cyan}Panel Access:${plain}"
     echo -e "    ${yellow}http://${SERVER_IP}/${web_path}/${plain}"
@@ -755,7 +577,7 @@ DROPIN
     echo -e "    Password: ${admin_pass}"
     echo ""
     echo -e "  ${cyan}Database:${plain}"
-    echo -e "    PostgreSQL — ${XUI_DB_DSN:-${PG_DSN:-unknown}}"
+    echo -e "    SQLite (/etc/x-ui/x-ui.db)"
     echo ""
     echo -e "  ${cyan}Reality (VLESS+REALITY):${plain}"
     echo -e "    Port: 443  |  SNI: ${DOMAIN}"
@@ -859,17 +681,8 @@ HTTPMIN
     # Clean any existing x-ui for a fresh install
     cleanup_existing_xui
 
-    # PostgreSQL setup (user requested local PostgreSQL)
     echo ""
-    info "Phase 2: Database Setup (PostgreSQL)"
-    echo ""
-    setup_postgres
-
-    # Write PG env file for install.sh
-    setup_env_file
-
-    echo ""
-    info "Phase 3: 3x-ui Panel Installation"
+    info "Phase 2: 3x-ui Panel Installation"
     echo ""
     info "${yellow}======================================================${plain}"
     info "${yellow}  RUNNING 3x-ui INSTALL (automated)${plain}"
@@ -882,7 +695,7 @@ HTTPMIN
     local install_url="https://raw.githubusercontent.com/ndotvpn/3x-ui/master/install.sh"
     # Pipe answers to install.sh's config_after_install:
     #   "2"  → PostgreSQL
-    #   "1"  → Install PostgreSQL locally (uses our existing PG)
+    #   "1"  → Install PostgreSQL locally
     #   ""   → Don't customize port (random)
     #   "4"  → Skip SSL
     #   "y"  → Bind to 127.0.0.1
