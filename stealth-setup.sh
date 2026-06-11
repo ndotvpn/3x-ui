@@ -522,6 +522,10 @@ setup_decoy() {
 </html>
 DECOYEOF
 
+    if [[ -d /usr/share/apache2/icons ]]; then
+        cp -r /usr/share/apache2/icons "${NGINX_ROOT}/" 2>/dev/null || true
+    fi
+
     info "Decoy — Official Apache2 Ubuntu default page created at ${NGINX_ROOT}"
 }
 
