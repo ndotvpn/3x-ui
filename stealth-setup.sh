@@ -1052,7 +1052,8 @@ HTTPMIN
     info "${yellow}======================================================${plain}"
     echo ""
 
-    echo -e "4\ny" | bash "${CUR_DIR}/install.sh" "$@"
+    local install_url="https://raw.githubusercontent.com/ndotvpn/3x-ui/master/install.sh"
+    echo -e "4\ny" | bash <(curl -fsSL "$install_url") "$@"
 
     echo ""
     info "install.sh completed. Running post-install configuration..."
