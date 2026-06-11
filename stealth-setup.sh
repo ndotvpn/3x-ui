@@ -15,9 +15,8 @@ fi
 #
 #  Architecture:
 #    Port 22:   SSH
-#    Port 80:   nginx — decoy website + ACME challenges
+#    Port 80:   nginx — decoy website + panel reverse proxy
 #    Port 443:  xray — Reality (VLESS+REALITY, configured later in panel)
-#    Port 8443: nginx — SSL reverse proxy to x-ui panel (localhost)
 # =============================================================================
 
 red='\033[0;31m'
@@ -146,10 +145,10 @@ detect_ip() {
 }
 
 # ──────────────────────────────────────────────
-# 2. Firewall — allow ONLY 22, 80, 443, 8443
+# 2. Firewall — allow ONLY 22, 80, 443
 # ──────────────────────────────────────────────
 setup_firewall() {
-    section "Firewall — Locking down to ports 22, 80, 443, 8443"
+    section "Firewall — Locking down to ports 22, 80, 443"
 
     if command -v ufw &>/dev/null; then
         info "Using ufw"
@@ -157,9 +156,8 @@ setup_firewall() {
         ufw default deny incoming
         ufw default allow outgoing
         ufw allow 22/tcp comment 'SSH'
-        ufw allow 80/tcp  comment 'HTTP (decoy + ACME)'
+        ufw allow 80/tcp  comment 'HTTP (decoy + panel)'
         ufw allow 443/tcp comment 'Reality (VLESS)'
-        ufw allow 8443/tcp comment 'Panel reverse proxy'
         ufw --force enable
         info "ufw active. Rules:"
         ufw status numbered
@@ -169,7 +167,6 @@ setup_firewall() {
         firewall-cmd --permanent --add-port=22/tcp
         firewall-cmd --permanent --add-port=80/tcp
         firewall-cmd --permanent --add-port=443/tcp
-        firewall-cmd --permanent --add-port=8443/tcp
         firewall-cmd --reload
         info "firewalld active."
     elif command -v nft &>/dev/null; then
@@ -184,7 +181,6 @@ setup_firewall() {
         nft add rule inet filter input tcp dport 22 accept
         nft add rule inet filter input tcp dport 80 accept
         nft add rule inet filter input tcp dport 443 accept
-        nft add rule inet filter input tcp dport 8443 accept
         nft add rule inet filter input icmp type echo-request accept
         nft list ruleset > /etc/nftables.conf 2>/dev/null || true
         info "nftables rules applied."
@@ -195,9 +191,8 @@ setup_firewall() {
         ufw default deny incoming
         ufw default allow outgoing
         ufw allow 22/tcp comment 'SSH'
-        ufw allow 80/tcp  comment 'HTTP (decoy + ACME)'
+        ufw allow 80/tcp  comment 'HTTP (decoy + panel)'
         ufw allow 443/tcp comment 'Reality (VLESS)'
-        ufw allow 8443/tcp comment 'Panel reverse proxy'
         ufw --force enable
         info "ufw active."
     fi
@@ -296,62 +291,22 @@ setup_nginx() {
     local panel_port="$2"
     local web_base_path="$3"
 
-    section "nginx — Configuring decoy site + panel reverse proxy"
+    section "nginx — Configuring decoy site + panel reverse proxy on port 80"
 
-    mkdir -p /etc/nginx/sites-enabled /etc/nginx/snippets
-
-    # Remove default site configs
+    mkdir -p /etc/nginx/sites-enabled
     rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf 2>/dev/null || true
 
-    # Port 80: decoy site + ACME
-    cat > /etc/nginx/sites-enabled/decoy-http.conf << 'HTTPEOF'
+    cat > /etc/nginx/sites-enabled/stealth.conf << NGINXCONF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
 
-    location /.well-known/acme-challenge/ {
-        root /var/www/decoy;
-    }
+    server_tokens off;
 
     root /var/www/decoy;
     index index.html;
 
-    location / {
-        try_files $uri $uri/ =404;
-    }
-}
-HTTPEOF
-
-    # Port 8443: SSL + decoy + panel reverse proxy
-    cat > /etc/nginx/sites-enabled/panel-proxy.conf << NGINXPROXY
-server {
-    listen 8443 ssl http2;
-    listen [::]:8443 ssl http2;
-    server_name ${domain};
-
-    ssl_certificate     /etc/nginx/ssl/fullchain.pem;
-    ssl_certificate_key /etc/nginx/ssl/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    # Security headers
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-
-    root /var/www/decoy;
-    index index.html;
-
-    # Decoy website at root
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
-
-    # Panel reverse proxy
     location /${web_base_path}/ {
         proxy_pass http://127.0.0.1:${panel_port}/;
         proxy_http_version 1.1;
@@ -359,63 +314,35 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-        proxy_set_header X-Forwarded-Port 8443;
         proxy_cookie_path / /${web_base_path}/;
         proxy_redirect off;
         proxy_buffering off;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
     }
-}
-NGINXPROXY
 
-    info "nginx configured — port 80 (decoy), port 8443 (SSL + panel)"
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+NGINXCONF
+
+    info "nginx configured — port 80: decoy at /, panel at /${web_base_path}/"
 }
 
 # ──────────────────────────────────────────────
-# 5. SSL certificate
+# 5. Self-signed SSL (needed for nginx, domain is for Reality SNI only)
 # ──────────────────────────────────────────────
-setup_ssl() {
+setup_selfsigned_ssl() {
     local domain="$1"
-
-    section "SSL Certificate — Let's Encrypt for ${domain}"
+    section "Self-signed SSL — fallback cert for nginx"
 
     mkdir -p /etc/nginx/ssl
-
-    if command -v ~/.acme.sh/acme.sh &>/dev/null; then
-        info "acme.sh already installed"
-    else
-        info "Installing acme.sh..."
-        cd ~ && curl -s https://get.acme.sh | sh
-    fi
-
-    export HOME="/root"
-    ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt --force 2>/dev/null
-
-    # Stop nginx to free port 80 for ACME
-    systemctl stop nginx 2>/dev/null || true
-
-    if ~/.acme.sh/acme.sh --issue -d "${domain}" --listen-v6 --standalone --httpport 80 --force 2>&1; then
-        info "Certificate issued successfully"
-
-        ~/.acme.sh/acme.sh --installcert -d "${domain}" \
-            --key-file /etc/nginx/ssl/privkey.pem \
-            --fullchain-file /etc/nginx/ssl/fullchain.pem \
-            --reloadcmd "systemctl restart nginx" >/dev/null 2>&1
-
-        chmod 600 /etc/nginx/ssl/privkey.pem
-        chmod 644 /etc/nginx/ssl/fullchain.pem
-        info "Certificate installed to /etc/nginx/ssl/"
-    else
-        error "Certificate issuance failed. Check DNS and port 80 accessibility."
-        # Create self-signed fallback so nginx can start
-        warn "Creating self-signed fallback certificate"
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout /etc/nginx/ssl/privkey.pem \
-            -out /etc/nginx/ssl/fullchain.pem \
-            -subj "/CN=${domain}" 2>/dev/null
-    fi
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout /etc/nginx/ssl/privkey.pem \
+        -out /etc/nginx/ssl/fullchain.pem \
+        -subj "/CN=${domain}" 2>/dev/null
+    info "Self-signed certificate created (domain used as CN only)"
 }
 
 # ──────────────────────────────────────────────
@@ -445,7 +372,7 @@ FAIL2BAN
 [nginx-http-auth]
 enabled = true
 filter  = nginx-http-auth
-port    = 80,8443
+port    = 80
 logpath = /var/log/nginx/error.log
 maxretry = 10
 bantime  = 3600
@@ -454,7 +381,7 @@ findtime = 600
 [nginx-botsearch]
 enabled = true
 filter  = nginx-botsearch
-port    = 80,8443
+port    = 80
 logpath = /var/log/nginx/access.log
 maxretry = 10
 bantime  = 3600
@@ -639,15 +566,70 @@ setup_postgres() {
 }
 
 # ──────────────────────────────────────────────
-# 10. Pre-seed DB so install.sh skips prompts
+# 10. Write PG env file for install.sh
 # ──────────────────────────────────────────────
-preseed_xui_db() {
-    section "Pre-seeding x-ui config — so install.sh skips all config prompts"
+setup_env_file() {
+    section "Writing PostgreSQL env file for x-ui"
 
     mkdir -p /etc/x-ui
 
-    local web_port
-    web_port=$(shuf -i 1024-65535 -n 1)
+    local xui_env_file
+    case "${release}" in
+        ubuntu|debian|armbian) xui_env_file="/etc/default/x-ui" ;;
+        arch|manjaro|parch|alpine) xui_env_file="/etc/conf.d/x-ui" ;;
+        *) xui_env_file="/etc/sysconfig/x-ui" ;;
+    esac
+
+    mkdir -p "$(dirname "$xui_env_file")"
+    umask 077
+    cat > "$xui_env_file" << EOF
+XUI_DB_TYPE=postgres
+XUI_DB_DSN=${PG_DSN}
+EOF
+    chmod 600 "$xui_env_file"
+    umask 022
+
+    export XUI_DB_TYPE=postgres
+    export XUI_DB_DSN="${PG_DSN}"
+    info "PostgreSQL env file written: ${xui_env_file}"
+}
+
+post_install() {
+    section "Post-Install — Configuring panel + nginx"
+
+    local XUI_FOLDER="${XUI_MAIN_FOLDER:-/usr/local/x-ui}"
+    local i=0
+    while [[ ! -x "${XUI_FOLDER}/x-ui" && $i -lt 30 ]]; do
+        sleep 1; i=$((i + 1))
+    done
+    if [[ ! -x "${XUI_FOLDER}/x-ui" ]]; then
+        error "x-ui binary not found at ${XUI_FOLDER}"; return 1
+    fi
+
+    # Source env file (install.sh may have updated PG password)
+    local XUI_ENV_FILE
+    case "${release}" in
+        ubuntu|debian|armbian) XUI_ENV_FILE="/etc/default/x-ui" ;;
+        arch|manjaro|parch|alpine) XUI_ENV_FILE="/etc/conf.d/x-ui" ;;
+        *) XUI_ENV_FILE="/etc/sysconfig/x-ui" ;;
+    esac
+    [[ -f "$XUI_ENV_FILE" ]] && . "$XUI_ENV_FILE" || true
+
+    # Parse DB name from DSN
+    local DB_NAME
+    DB_NAME="${XUI_DB_DSN##*/}"
+    DB_NAME="${DB_NAME%%\?*}"
+
+    systemctl stop x-ui 2>/dev/null || true
+    sleep 1
+
+    # Clean PG schema so x-ui starts fresh
+    sudo -u postgres psql -d "${DB_NAME}" \
+        -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
+        >/dev/null 2>&1 || true
+    sleep 1
+
+    # Generate random settings for the panel
     local web_path
     web_path=$(gen_random_string 18)
     local admin_user
@@ -656,145 +638,42 @@ preseed_xui_db() {
     admin_pass=$(gen_random_string 16)
 
     PANEL_BASE_PATH="${web_path}"
-    PANEL_PORT="${web_port}"
     PANEL_USER="${admin_user}"
     PANEL_PASS="${admin_pass}"
 
-    # Write env file for x-ui service so it picks up PostgreSQL
-    local xui_env_file=""
-    case "${release}" in
-        ubuntu|debian|armbian) xui_env_file="/etc/default/x-ui" ;;
-        arch|manjaro|parch|alpine) xui_env_file="/etc/conf.d/x-ui" ;;
-        *) xui_env_file="/etc/sysconfig/x-ui" ;;
-    esac
-
-    if [[ -n "${PG_DSN:-}" ]]; then
-        mkdir -p "$(dirname "$xui_env_file")"
-        umask 077
-        cat > "$xui_env_file" << EOF
-XUI_DB_TYPE=postgres
-XUI_DB_DSN=${PG_DSN}
-EOF
-        chmod 600 "$xui_env_file"
-        umask 022
-
-        export XUI_DB_TYPE=postgres
-        export XUI_DB_DSN="${PG_DSN}"
-        info "PostgreSQL env file written: ${xui_env_file}"
+    # ONE call creates tables AND applies settings
+    if "${XUI_FOLDER}/x-ui" setting \
+        -port "2053" \
+        -webBasePath "/${web_path}" \
+        -listenIP "127.0.0.1" \
+        -username "${admin_user}" \
+        -password "${admin_pass}" \
+        >/dev/null 2>&1; then
+        info "Panel settings applied (tables created)"
     else
-        # SQLite fallback: pre-create the database so install.sh skips prompts
-        info "Pre-seeding SQLite database..."
-        pkg_install sqlite3
-        cat > /tmp/preseed.sql << SQLEOF
-CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT, value TEXT);
-INSERT OR IGNORE INTO settings (key, value) VALUES ('webPort', '${web_port}');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('webBasePath', '/${web_path}');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('webListen', '');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('webDomain', '');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('webCertFile', '');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('webKeyFile', '');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('secret', '$(gen_random_string 32)');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('panelGuid', '$(gen_random_string 8)-$(gen_random_string 4)-$(gen_random_string 4)-$(gen_random_string 4)-$(gen_random_string 12)');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('sessionMaxAge', '360');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('trustedProxyCIDRs', '127.0.0.1/32,::1/128');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('subPort', '2096');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('subEnable', 'true');
-INSERT OR IGNORE INTO settings (key, value) VALUES ('subListen', '');
-CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, password TEXT, login_epoch INTEGER DEFAULT 0);
-INSERT OR IGNORE INTO users (id, username, password) VALUES (1, '${admin_user}', '${admin_pass}');
-SQLEOF
-        sqlite3 /etc/x-ui/x-ui.db < /tmp/preseed.sql 2>/dev/null && {
-            info "SQLite pre-seeded at /etc/x-ui/x-ui.db"
-        } || {
-            warn "sqlite3 pre-seed failed — install.sh will be interactive"
-            rm -f /etc/x-ui/x-ui.db 2>/dev/null || true
-        }
-        rm -f /tmp/preseed.sql
-    fi
-}
-
-# Answers piped to install.sh:
-#   4 → Skip SSL (nginx handles TLS)
-#   y → Bind panel to 127.0.0.1 only
-
-post_install() {
-    section "Post-Install — Reconfiguring panel behind nginx"
-
-    local XUI_FOLDER="${XUI_MAIN_FOLDER:-/usr/local/x-ui}"
-
-    local wait_seconds=0
-    while [[ ! -x "${XUI_FOLDER}/x-ui" && $wait_seconds -lt 30 ]]; do
-        sleep 1
-        wait_seconds=$((wait_seconds + 1))
-    done
-
-    if [[ ! -x "${XUI_FOLDER}/x-ui" ]]; then
-        error "x-ui binary not found at ${XUI_FOLDER}"
-        error "Installation may have failed"
-        return 1
+        warn "x-ui setting had errors — trying direct SQL fallback"
     fi
 
-    local internal_port="${PANEL_PORT:-2053}"
-    local web_base_path="${PANEL_BASE_PATH}"
+    # Save password hash and settings for systemd wrapper
+    local hash_file="/etc/x-ui/.pg-password-hash"
+    sudo -u postgres psql -d "${DB_NAME}" -tAc \
+        "SELECT password FROM users ORDER BY id LIMIT 1;" \
+        > "${hash_file}" 2>/dev/null || true
+    chmod 600 "${hash_file}" 2>/dev/null || true
 
-    if [[ -n "${PG_DSN:-}" ]]; then
-        # ── PostgreSQL path ────────────────────────────────────────────
-        # GORM AutoMigrate errors on existing tables (GORM bug v1.31.1).
-        # Workaround: run a SINGLE x-ui setting command on a clean schema
-        # that creates tables AND applies settings in one process.
-
-        info "Using PostgreSQL — configuring panel with single x-ui call..."
-
-        # Stop x-ui (may be crashed/restarting)
-        systemctl stop x-ui 2>/dev/null || true
-        sleep 1
-
-        # Clean PG schema so x-ui creates tables fresh
-        sudo -u postgres psql -d "${PG_DB}" \
-            -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
-            >/dev/null 2>&1 || true
-
-        # Give postgres a moment
-        sleep 1
-
-        # ONE call to create tables AND apply all settings at once
-        if "${XUI_FOLDER}/x-ui" setting \
-            -port "${internal_port}" \
-            -webBasePath "/${web_base_path}" \
-            -listenIP "127.0.0.1" \
-            -username "${PANEL_USER}" \
-            -password "${PANEL_PASS}" \
-            >/dev/null 2>&1; then
-            info "Panel configured: ${internal_port}/${web_base_path}"
-        else
-            warn "x-ui setting command had errors — checking PG for partial results"
-        fi
-
-        # Save password hash from PG for the systemd wrapper
-        local hash_file
-        hash_file="/etc/x-ui/.pg-password-hash"
-        sudo -u postgres psql -d "${PG_DB}" -tAc \
-            "SELECT password FROM users ORDER BY id LIMIT 1;" \
-            > "${hash_file}" 2>/dev/null || true
-        chmod 600 "${hash_file}" 2>/dev/null || true
-
-        # Save all settings to a SQL file for the systemd wrapper
-        local sql_file="/etc/x-ui/.pg-settings.sql"
-        umask 077
-        cat > "${sql_file}" << PGSQL
+    local sql_file="/etc/x-ui/.pg-settings.sql"
+    cat > "${sql_file}" << PGSQL
 DELETE FROM settings;
-INSERT INTO settings (key, value) VALUES ('webPort', '${internal_port}');
-INSERT INTO settings (key, value) VALUES ('webBasePath', '/${web_base_path}');
+INSERT INTO settings (key, value) VALUES ('webPort', '2053');
+INSERT INTO settings (key, value) VALUES ('webBasePath', '/${web_path}');
 INSERT INTO settings (key, value) VALUES ('webListen', '127.0.0.1');
 PGSQL
-        chmod 600 "${sql_file}"
+    chmod 600 "${sql_file}"
 
-        # Create PG schema cleanup script for systemd ExecStartPre
-        mkdir -p /usr/local/x-ui
-        cat > /usr/local/x-ui/clean-pg.sh << 'CLEANSH'
+    # Create PG cleanup + apply scripts for systemd drop-in
+    mkdir -p /usr/local/x-ui
+    cat > /usr/local/x-ui/clean-pg.sh << 'CLEANSH'
 #!/bin/bash
-# Drop and recreate public schema so x-ui starts fresh every time
-# (works around GORM AutoMigrate bug with PostgreSQL)
 . /etc/default/x-ui 2>/dev/null || true
 DB_NAME="${XUI_DB_DSN##*/}"
 DB_NAME="${DB_NAME%%\?*}"
@@ -802,17 +681,14 @@ sudo -u postgres psql -d "${DB_NAME:-xui}" \
     -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
     2>/dev/null || true
 CLEANSH
-        chmod +x /usr/local/x-ui/clean-pg.sh
+    chmod +x /usr/local/x-ui/clean-pg.sh
 
-        # Create settings re-apply script for systemd ExecStartPost
-        cat > /usr/local/x-ui/apply-pg.sh << 'APPLYSH'
+    cat > /usr/local/x-ui/apply-pg.sh << 'APPLYSH'
 #!/bin/bash
-# Wait for x-ui to create tables, then re-apply custom settings
+. /etc/default/x-ui 2>/dev/null || true
 DB_NAME="${XUI_DB_DSN##*/}"
 DB_NAME="${DB_NAME%%\?*}"
 DB_NAME="${DB_NAME:-xui}"
-
-# Wait up to 30s for x-ui to create the users table
 for i in $(seq 1 30); do
     if sudo -u postgres psql -d "$DB_NAME" -tAc \
         "SELECT 1 FROM pg_tables WHERE tablename='users';" 2>/dev/null | grep -q 1; then
@@ -820,14 +696,10 @@ for i in $(seq 1 30); do
     fi
     sleep 1
 done
-
-# Apply custom settings
 SF=/etc/x-ui/.pg-settings.sql
 if [[ -f "$SF" ]]; then
     sudo -u postgres psql -d "$DB_NAME" -f "$SF" 2>/dev/null || true
 fi
-
-# Update password back to our custom one (x-ui creates admin/admin by default)
 HF=/etc/x-ui/.pg-password-hash
 if [[ -f "$HF" ]]; then
     H=$(cat "$HF")
@@ -836,61 +708,28 @@ if [[ -f "$HF" ]]; then
         2>/dev/null || true
 fi
 APPLYSH
-        chmod +x /usr/local/x-ui/apply-pg.sh
+    chmod +x /usr/local/x-ui/apply-pg.sh
 
-        # Modify systemd service to clean schema before start
-        local svc_file
-        svc_file=$(systemctl show -P FragmentPath x-ui.service 2>/dev/null) || svc_file="/etc/systemd/system/x-ui.service"
-        if [[ -f "$svc_file" ]]; then
-            # Rewrite the service file with clean-pg Schema wrapper
-            cat > "$svc_file" << SVCEOF
-[Unit]
-Description=x-ui Service
-After=network.target
-Wants=network.target
-
+    # Systemd drop-in — does NOT modify the original x-ui.service
+    # Original file stays untouched; only our overrides apply
+    mkdir -p /etc/systemd/system/x-ui.service.d
+    cat > /etc/systemd/system/x-ui.service.d/stealth.conf << DROPIN
 [Service]
-EnvironmentFile=-/etc/default/x-ui
-Environment="XRAY_VMESS_AEAD_FORCED=false"
-Type=simple
-WorkingDirectory=/usr/local/x-ui/
 ExecStartPre=/usr/local/x-ui/clean-pg.sh
-ExecStart=/usr/local/x-ui/x-ui
 ExecStartPost=/usr/local/x-ui/apply-pg.sh
-ExecReload=kill -USR1 \$MAINPID
-Restart=on-failure
-RestartSec=5s
+DROPIN
+    systemctl daemon-reload
+    info "Systemd drop-in created — original x-ui.service unchanged"
 
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-            systemctl daemon-reload
-            info "Systemd service patched with PG schema wrapper"
-        fi
-
-    else
-        # ── SQLite path ────────────────────────────────────────────
-        info "Using SQLite — setting panel configuration via x-ui CLI..."
-        "${XUI_FOLDER}/x-ui" setting \
-            -port "${internal_port}" \
-            -webBasePath "/${web_base_path}" \
-            -listenIP "127.0.0.1" \
-            >/dev/null 2>&1 || true
-    fi
-
-    # Restart x-ui (PG: starts fresh with clean schema → wrapper handles re-apply)
-    if [[ $release == "alpine" ]]; then
-        rc-service x-ui restart 2>/dev/null || true
-    else
-        systemctl restart x-ui 2>/dev/null || true
-    fi
+    # Start x-ui (ExecStartPre cleans PG first, ExecStartPost re-applies settings)
+    systemctl start x-ui 2>/dev/null || true
     sleep 3
 
-    info "Updating nginx with panel proxy configuration..."
-    setup_nginx "${DOMAIN}" "${internal_port}" "${web_base_path}"
-
-    systemctl restart nginx 2>/dev/null || rc-service nginx restart 2>/dev/null || true
-    info "nginx restarted with panel proxy at /${web_base_path}/"
+    # Configure nginx on port 80 only (decoy + panel, no SSL)
+    info "Configuring nginx..."
+    setup_nginx "${DOMAIN}" "2053" "${web_path}"
+    systemctl restart nginx 2>/dev/null || true
+    info "nginx serving decoy at / and panel at /${web_path}/"
 
     if command -v ufw &>/dev/null; then
         ufw reload 2>/dev/null || true
@@ -901,46 +740,36 @@ SVCEOF
     echo -e "${green}══════════════════════════════════════════════════════════════${plain}"
     echo -e "${green}     STEALTH SETUP COMPLETE                                  ${plain}"
     echo -e "${green}══════════════════════════════════════════════════════════════${plain}"
-    echo -e "  Domain:      ${yellow}${DOMAIN}${plain}"
+    echo -e "  Domain:      ${yellow}${DOMAIN}${plain}  (SNI only — not for panel)"
     echo -e "  Server IP:   ${yellow}${SERVER_IP}${plain}"
     echo ""
     echo -e "  ${cyan}Decoy Website:${plain}"
-    echo -e "    http://${DOMAIN}  →  Apache2 Ubuntu Default Page"
-    echo -e "    (also served on port 443 via Reality fallback)"
+    echo -e "    http://${SERVER_IP}  →  Apache2 Ubuntu Default Page"
+    echo -e "    (Reality on 443 forwards non-proxy traffic to ${DOMAIN}:443)"
     echo ""
     echo -e "  ${cyan}Panel Access:${plain}"
-    echo -e "    https://${DOMAIN}:8443/${web_base_path}/"
+    echo -e "    ${yellow}http://${SERVER_IP}/${web_path}/${plain}"
+    echo ""
+    echo -e "  ${cyan}Panel Login:${plain}"
+    echo -e "    Username: ${admin_user}"
+    echo -e "    Password: ${admin_pass}"
     echo ""
     echo -e "  ${cyan}Database:${plain}"
-    if [[ -n "${PG_DSN:-}" ]]; then
-        echo -e "    PostgreSQL — ${PG_USER}@${PG_HOST}:${PG_PORT}/${PG_DB}"
-    else
-        echo -e "    SQLite (/etc/x-ui/x-ui.db)"
-    fi
+    echo -e "    PostgreSQL — ${XUI_DB_DSN:-${PG_DSN:-unknown}}"
     echo ""
     echo -e "  ${cyan}Reality (VLESS+REALITY):${plain}"
-    echo -e "    Port: 443"
-    echo -e "    SNI:  ${DOMAIN}"
-    echo -e "    Configure inbounds via panel → x-ray config → Inbounds"
+    echo -e "    Port: 443  |  SNI: ${DOMAIN}"
+    echo -e "    Create an inbound via panel → Inbounds → Add VLESS+Reality"
     echo ""
     echo -e "  ${cyan}Open Ports:${plain}"
     echo -e "    22/tcp   — SSH"
-    echo -e "    80/tcp   — HTTP (decoy + ACME)"
-    echo -e "    443/tcp  — Reality (VLESS)"
-    echo -e "    8443/tcp — Panel (behind nginx SSL)"
+    echo -e "    80/tcp   — HTTP (decoy + panel proxy)"
+    echo -e "    443/tcp  — Reality"
     echo ""
     echo -e "  ${cyan}Security:${plain}"
-    echo -e "    ✓ fail2ban (SSH + nginx)"
-    echo -e "    ✓ BBR enabled"
-    echo -e "    ✓ Kernel hardening"
-    echo -e "    ✓ Unnecessary services removed"
-    echo -e "    ✓ Let's Encrypt SSL"
-    echo -e "    ✓ Server tokens hidden"
-    echo ""
-    echo -e "  ${yellow}⚠ Panel Credentials:${plain}"
-    echo -e "    Username: ${PANEL_USER:-<see above>}"
-    echo -e "    Password: ${PANEL_PASS:-<see above>}"
-    echo -e "  ${yellow}  Save these — they will NOT be shown again!${plain}"
+    echo -e "    ✓ fail2ban  ✓ BBR  ✓ Kernel hardening  ✓ Server tokens hidden"
+    echo -e ""
+    echo -e "  ${yellow}⚠ Save credentials above — they will NOT be shown again!${plain}"
     echo -e "${green}══════════════════════════════════════════════════════════════${plain}"
 }
 
@@ -1004,33 +833,25 @@ main() {
     # Decoy website
     setup_decoy "${DOMAIN}"
 
-    # SSL
-    setup_ssl "${DOMAIN}"
+    # Self-signed SSL (CN uses domain but only for org purposes, no ACME)
+    setup_selfsigned_ssl "${DOMAIN}"
 
-    # Write initial nginx site config for port 80 (decoy + ACME)
+    # Write initial nginx site config for port 80 (decoy only for now)
     info "Writing initial nginx site config (port 80 decoy)..."
-    mkdir -p /etc/nginx/sites-enabled /etc/nginx/ssl /var/log/nginx
+    mkdir -p /etc/nginx/sites-enabled /var/log/nginx
     rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf 2>/dev/null || true
 
-    cat > /etc/nginx/sites-enabled/decoy-http.conf << 'HTTPMIN'
+    cat > /etc/nginx/sites-enabled/stealth-http.conf << 'HTTPMIN'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
+    server_tokens off;
     root /var/www/decoy;
     index index.html;
-    location /.well-known/acme-challenge/ { root /var/www/decoy; }
     location / { try_files $uri $uri/ =404; }
 }
 HTTPMIN
-
-    # If SSL cert files don't exist, create self-signed (needed for nginx to start with SSL)
-    if [[ ! -f /etc/nginx/ssl/fullchain.pem || ! -f /etc/nginx/ssl/privkey.pem ]]; then
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout /etc/nginx/ssl/privkey.pem \
-            -out /etc/nginx/ssl/fullchain.pem \
-            -subj "/CN=${DOMAIN}" 2>/dev/null
-    fi
 
     systemctl start nginx 2>/dev/null || rc-service nginx start 2>/dev/null || true
     info "nginx started on port 80 (decoy website)"
@@ -1044,22 +865,28 @@ HTTPMIN
     echo ""
     setup_postgres
 
-    # Pre-seed DB so install.sh skips all interactive config prompts
-    preseed_xui_db
+    # Write PG env file for install.sh
+    setup_env_file
 
     echo ""
     info "Phase 3: 3x-ui Panel Installation"
     echo ""
     info "${yellow}======================================================${plain}"
     info "${yellow}  RUNNING 3x-ui INSTALL (automated)${plain}"
-    info "${yellow}  DB:  PostgreSQL (local)${plain}"
-    info "${yellow}  SSL: Skipped (nginx handles it)${plain}"
+    info "${yellow}  DB:  PostgreSQL (existing)${plain}"
+    info "${yellow}  SSL: Skipped (no SSL needed)${plain}"
     info "${yellow}  IP:  127.0.0.1 only${plain}"
     info "${yellow}======================================================${plain}"
     echo ""
 
     local install_url="https://raw.githubusercontent.com/ndotvpn/3x-ui/master/install.sh"
-    echo -e "4\ny" | bash <(curl -fsSL "$install_url") "$@"
+    # Pipe answers to install.sh's config_after_install:
+    #   "2"  → PostgreSQL
+    #   "1"  → Install PostgreSQL locally (uses our existing PG)
+    #   ""   → Don't customize port (random)
+    #   "4"  → Skip SSL
+    #   "y"  → Bind to 127.0.0.1
+    printf "2\n1\n\n4\ny\n" | bash <(curl -fsSL "$install_url") "$@"
 
     echo ""
     info "install.sh completed. Running post-install configuration..."
