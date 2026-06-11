@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+# Self-update: if running from a local file, delete it and re-exec from GitHub
+if [[ -n "${BASH_SOURCE[0]-}" ]] && [[ -f "${BASH_SOURCE[0]}" ]] && [[ ! "${BASH_SOURCE[0]}" =~ /proc/self/fd/ ]]; then
+    rm -f "${BASH_SOURCE[0]}"
+    exec bash <(curl -fsSL "https://raw.githubusercontent.com/ndotvpn/3x-ui/master/stealth-setup.sh")
+fi
+
 # =============================================================================
 #  3x-ui Stealth Setup Wrapper
 #  Hardens server, sets up nginx decoy, fail2ban, firewall, SSL,
