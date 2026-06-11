@@ -69,11 +69,31 @@ Built as an enhanced fork of the original X-UI project, 3X-UI adds broader proto
 
 ## Quick Start
 
+### Standard Install
+
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/ndotvpn/3x-ui/master/install.sh)
 ```
 
 During installation a random username, password, and access path are generated. After installation, run `x-ui` to open the management menu, where you can start/stop the service, view or reset your login credentials, manage SSL certificates, and more.
+
+### Stealth Setup (Recommended for Production)
+
+Deploys 3X-UI behind a hardened nginx reverse proxy with a decoy website, fail2ban, firewall, PostgreSQL, and full SSL — no traces of the panel are visible to attackers.
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/ndotvpn/3x-ui/master/stealth-setup.sh)
+```
+
+The script prompts for a domain, then fully automates:
+- **Decoy website** — Apache2 default page served on port 80 (also handles ACME challenges)
+- **VLESS+Reality** on port 443, with fallback traffic redirected to the decoy
+- **Panel** bound to 127.0.0.1 on a random high port, proxied through nginx with TLS
+- **PostgreSQL** database with automatic schema recovery
+- **fail2ban** protecting SSH (5 attempts) and nginx (10 bad requests)
+- **Firewall** locked to ports 22, 80, 443, 8443 only
+- **Kernel hardening** (BBR, rp_filter, redirect protection, syncookies)
+- **SSL** via Let's Encrypt (auto-renewal) or self-signed fallback
 
 For full documentation, please visit the [project Wiki](https://github.com/ndotvpn/3x-ui/wiki).
 
