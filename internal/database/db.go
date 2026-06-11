@@ -80,10 +80,6 @@ func initModels() error {
 				log.Printf("Ignoring duplicate column during auto migration for %T: %v", mdl, err)
 				continue
 			}
-			if isTableAlreadyExists(err) {
-				log.Printf("Ignoring duplicate table error during auto migration for %T: %v", mdl, err)
-				continue
-			}
 			log.Printf("Error auto migrating model: %v", err)
 			return err
 		}
@@ -124,22 +120,6 @@ func pruneOrphanedClientInbounds() error {
 		log.Printf("Pruned %d orphaned client_inbounds row(s)", res.RowsAffected)
 	}
 	return nil
-}
-
-// isTableAlreadyExists reports whether err is a PostgreSQL
-// "relation already exists" error (SQLSTATE 42P07), which GORM's
-// AutoMigrate can emit on the second call when the table was already
-// created by a previous invocation.
-func isTableAlreadyExists(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-	if strings.Contains(errMsg, "SQLSTATE 42P07") ||
-		strings.Contains(errMsg, "already exists") {
-		return true
-	}
-	return false
 }
 
 func isIgnorableDuplicateColumnErr(err error, mdl any) bool {

@@ -619,8 +619,9 @@ setup_postgres() {
     sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${PG_USER}'" 2>/dev/null | grep -q 1 \
         || sudo -u postgres psql -c "CREATE USER \"${PG_USER}\" WITH PASSWORD '${PG_PASS}';" >/dev/null 2>&1 || true
 
-    sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${PG_DB}'" 2>/dev/null | grep -q 1 \
-        || sudo -u postgres psql -c "CREATE DATABASE \"${PG_DB}\" OWNER \"${PG_USER}\";" >/dev/null 2>&1 || true
+    # Always drop and recreate for a clean start (avoids GORM migration errors)
+    sudo -u postgres psql -c "DROP DATABASE IF EXISTS \"${PG_DB}\";" >/dev/null 2>&1 || true
+    sudo -u postgres psql -c "CREATE DATABASE \"${PG_DB}\" OWNER \"${PG_USER}\";" >/dev/null 2>&1 || true
 
     sudo -u postgres psql -c "ALTER USER \"${PG_USER}\" WITH PASSWORD '${PG_PASS}';" >/dev/null 2>&1 || true
 
@@ -727,45 +728,169 @@ post_install() {
         return 1
     fi
 
-    # Read current panel settings
-    local settings
-    settings=$("${XUI_FOLDER}/x-ui" setting -show true 2>/dev/null || true)
-    local current_port
-    current_port=$(echo "$settings" | grep -Eo 'port: .+' | awk '{print $2}' || echo "${PANEL_PORT:-2053}")
-    local current_webBasePath
-    current_webBasePath=$(echo "$settings" | grep -Eo 'webBasePath: .+' | awk '{print $2}' | sed 's#^/##; s#/$##' || echo "${PANEL_BASE_PATH}")
+    local internal_port="${PANEL_PORT:-2053}"
+    local web_base_path="${PANEL_BASE_PATH}"
 
-    PANEL_BASE_PATH="${current_webBasePath}"
-    local internal_port="${current_port}"
+    if [[ -n "${PG_DSN:-}" ]]; then
+        # ── PostgreSQL path ────────────────────────────────────────────
+        # GORM AutoMigrate errors on existing tables (GORM bug v1.31.1).
+        # Workaround: run a SINGLE x-ui setting command on a clean schema
+        # that creates tables AND applies settings in one process.
 
-    # If panel is on privileged port (<1024), move it
-    if [[ "$internal_port" -lt 1024 ]]; then
-        internal_port=$(shuf -i 1024-65535 -n 1)
-        "${XUI_FOLDER}/x-ui" setting -port "${internal_port}" >/dev/null 2>&1 || true
-        info "Panel moved from port ${current_port} to ${internal_port}"
+        info "Using PostgreSQL — configuring panel with single x-ui call..."
+
+        # Stop x-ui (may be crashed/restarting)
+        systemctl stop x-ui 2>/dev/null || true
+        sleep 1
+
+        # Clean PG schema so x-ui creates tables fresh
+        sudo -u postgres psql -d "${PG_DB}" \
+            -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
+            >/dev/null 2>&1 || true
+
+        # Give postgres a moment
+        sleep 1
+
+        # ONE call to create tables AND apply all settings at once
+        if "${XUI_FOLDER}/x-ui" setting \
+            -port "${internal_port}" \
+            -webBasePath "/${web_base_path}" \
+            -listenIP "127.0.0.1" \
+            -username "${PANEL_USER}" \
+            -password "${PANEL_PASS}" \
+            >/dev/null 2>&1; then
+            info "Panel configured: ${internal_port}/${web_base_path}"
+        else
+            warn "x-ui setting command had errors — checking PG for partial results"
+        fi
+
+        # Save password hash from PG for the systemd wrapper
+        local hash_file
+        hash_file="/etc/x-ui/.pg-password-hash"
+        sudo -u postgres psql -d "${PG_DB}" -tAc \
+            "SELECT password FROM users ORDER BY id LIMIT 1;" \
+            > "${hash_file}" 2>/dev/null || true
+        chmod 600 "${hash_file}" 2>/dev/null || true
+
+        # Save all settings to a SQL file for the systemd wrapper
+        local sql_file="/etc/x-ui/.pg-settings.sql"
+        umask 077
+        cat > "${sql_file}" << PGSQL
+DELETE FROM settings;
+INSERT INTO settings (key, value) VALUES ('webPort', '${internal_port}');
+INSERT INTO settings (key, value) VALUES ('webBasePath', '/${web_base_path}');
+INSERT INTO settings (key, value) VALUES ('webListen', '127.0.0.1');
+PGSQL
+        chmod 600 "${sql_file}"
+
+        # Create PG schema cleanup script for systemd ExecStartPre
+        mkdir -p /usr/local/x-ui
+        cat > /usr/local/x-ui/clean-pg.sh << 'CLEANSH'
+#!/bin/bash
+# Drop and recreate public schema so x-ui starts fresh every time
+# (works around GORM AutoMigrate bug with PostgreSQL)
+. /etc/default/x-ui 2>/dev/null || true
+DB_NAME="${XUI_DB_DSN##*/}"
+DB_NAME="${DB_NAME%%\?*}"
+sudo -u postgres psql -d "${DB_NAME:-xui}" \
+    -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" \
+    2>/dev/null || true
+CLEANSH
+        chmod +x /usr/local/x-ui/clean-pg.sh
+
+        # Create settings re-apply script for systemd ExecStartPost
+        cat > /usr/local/x-ui/apply-pg.sh << 'APPLYSH'
+#!/bin/bash
+# Wait for x-ui to create tables, then re-apply custom settings
+DB_NAME="${XUI_DB_DSN##*/}"
+DB_NAME="${DB_NAME%%\?*}"
+DB_NAME="${DB_NAME:-xui}"
+
+# Wait up to 30s for x-ui to create the users table
+for i in $(seq 1 30); do
+    if sudo -u postgres psql -d "$DB_NAME" -tAc \
+        "SELECT 1 FROM pg_tables WHERE tablename='users';" 2>/dev/null | grep -q 1; then
+        break
+    fi
+    sleep 1
+done
+
+# Apply custom settings
+SF=/etc/x-ui/.pg-settings.sql
+if [[ -f "$SF" ]]; then
+    sudo -u postgres psql -d "$DB_NAME" -f "$SF" 2>/dev/null || true
+fi
+
+# Update password back to our custom one (x-ui creates admin/admin by default)
+HF=/etc/x-ui/.pg-password-hash
+if [[ -f "$HF" ]]; then
+    H=$(cat "$HF")
+    sudo -u postgres psql -d "$DB_NAME" \
+        -c "UPDATE users SET password='${H}' WHERE username='admin';" \
+        2>/dev/null || true
+fi
+APPLYSH
+        chmod +x /usr/local/x-ui/apply-pg.sh
+
+        # Modify systemd service to clean schema before start
+        local svc_file
+        svc_file=$(systemctl show -P FragmentPath x-ui.service 2>/dev/null) || svc_file="/etc/systemd/system/x-ui.service"
+        if [[ -f "$svc_file" ]]; then
+            # Rewrite the service file with clean-pg Schema wrapper
+            cat > "$svc_file" << SVCEOF
+[Unit]
+Description=x-ui Service
+After=network.target
+Wants=network.target
+
+[Service]
+EnvironmentFile=-/etc/default/x-ui
+Environment="XRAY_VMESS_AEAD_FORCED=false"
+Type=simple
+WorkingDirectory=/usr/local/x-ui/
+ExecStartPre=/usr/local/x-ui/clean-pg.sh
+ExecStart=/usr/local/x-ui/x-ui
+ExecStartPost=/usr/local/x-ui/apply-pg.sh
+ExecReload=kill -USR1 \$MAINPID
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+            systemctl daemon-reload
+            info "Systemd service patched with PG schema wrapper"
+        fi
+
+    else
+        # ── SQLite path ────────────────────────────────────────────
+        info "Using SQLite — setting panel configuration via x-ui CLI..."
+        "${XUI_FOLDER}/x-ui" setting \
+            -port "${internal_port}" \
+            -webBasePath "/${web_base_path}" \
+            -listenIP "127.0.0.1" \
+            >/dev/null 2>&1 || true
     fi
 
-    # Bind panel to 127.0.0.1 only
-    "${XUI_FOLDER}/x-ui" setting -listenIP "127.0.0.1" >/dev/null 2>&1 || true
-    info "Panel bound to 127.0.0.1:${internal_port}/${PANEL_BASE_PATH}"
-
+    # Restart x-ui (PG: starts fresh with clean schema → wrapper handles re-apply)
     if [[ $release == "alpine" ]]; then
         rc-service x-ui restart 2>/dev/null || true
     else
         systemctl restart x-ui 2>/dev/null || true
     fi
-    sleep 2
+    sleep 3
 
     info "Updating nginx with panel proxy configuration..."
-    setup_nginx "${DOMAIN}" "${internal_port}" "${PANEL_BASE_PATH}"
+    setup_nginx "${DOMAIN}" "${internal_port}" "${web_base_path}"
 
     systemctl restart nginx 2>/dev/null || rc-service nginx restart 2>/dev/null || true
-    info "nginx restarted with panel proxy at /${PANEL_BASE_PATH}/"
+    info "nginx restarted with panel proxy at /${web_base_path}/"
 
     if command -v ufw &>/dev/null; then
         ufw reload 2>/dev/null || true
     fi
 
+    # ── Summary ───────────────────────────────────────────────────
     echo ""
     echo -e "${green}══════════════════════════════════════════════════════════════${plain}"
     echo -e "${green}     STEALTH SETUP COMPLETE                                  ${plain}"
@@ -778,7 +903,7 @@ post_install() {
     echo -e "    (also served on port 443 via Reality fallback)"
     echo ""
     echo -e "  ${cyan}Panel Access:${plain}"
-    echo -e "    https://${DOMAIN}:8443/${PANEL_BASE_PATH}/"
+    echo -e "    https://${DOMAIN}:8443/${web_base_path}/"
     echo ""
     echo -e "  ${cyan}Database:${plain}"
     if [[ -n "${PG_DSN:-}" ]]; then
