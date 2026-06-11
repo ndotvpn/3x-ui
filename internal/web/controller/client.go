@@ -154,13 +154,21 @@ func (a *ClientController) create(c *gin.Context) {
 
 		host := resolveHost(c)
 		tmplCfg, _ := a.settingService.GetXrayConfigTemplate()
+
+		var subOutbounds []any
+		subSvc := &service.OutboundSubscriptionService{}
+		if subs, err := subSvc.AllActiveOutbounds(); err == nil {
+			subOutbounds = subs
+		}
+
 		var configs []map[string]any
 		for _, ibId := range inboundIds {
 			ib, ibErr := a.inboundService.GetInbound(ibId)
 			if ibErr != nil {
 				continue
 			}
-			cfg := buildClientConfig(host, ib, rec, tmplCfg)
+			address, resolvedPort := resolveEndpoint(host, ib)
+			cfg := buildClientConfig(address, resolvedPort, ib, rec, tmplCfg, subOutbounds)
 			configs = append(configs, cfg)
 		}
 		if len(configs) > 0 {

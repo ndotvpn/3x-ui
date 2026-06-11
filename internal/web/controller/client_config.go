@@ -4,23 +4,67 @@ import (
 	"encoding/json"
 	"net"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 )
 
-var clientInboundTags = map[string]bool{
+var serverInboundTags = map[string]bool{
 	"api":          true,
 	"metrics_out":  true,
 	"metrics-in":   true,
 	"panel-egress": true,
 }
 
-func buildClientConfig(host string, inbound *model.Inbound, client *model.ClientRecord, templateJSON string) map[string]any {
-	address := clientAddress(host, inbound)
+func resolveEndpoint(host string, inbound *model.Inbound) (address string, port int) {
+	address = clientAddress(host, inbound)
+	port = inbound.Port
 
+	if inbound.NodeID != nil {
+		var node model.Node
+		if err := database.GetDB().First(&node, *inbound.NodeID).Error; err == nil && node.Address != "" {
+			address = node.Address
+		}
+	}
+
+	if listenIsInternalOnly(inbound.Listen) {
+		var rule model.InboundFallback
+		if err := database.GetDB().
+			Where("child_id = ?", inbound.Id).
+			Order("sort_order ASC, id ASC").
+			First(&rule).Error; err == nil {
+			var master model.Inbound
+			if err := database.GetDB().First(&master, rule.MasterId).Error; err == nil {
+				ma, mp := resolveEndpoint(host, &master)
+			address = ma
+			port = mp
+				port = master.Port
+			}
+		}
+	}
+	return
+}
+
+func listenIsInternalOnly(listen string) bool {
+	if listen == "" {
+		return false
+	}
+	if listen[0] == '@' || listen[0] == '/' {
+		return true
+	}
+	ip := net.ParseIP(listen)
+	return ip != nil && ip.IsLoopback()
+}
+
+func buildClientConfig(address string, port int, inbound *model.Inbound, client *model.ClientRecord, templateJSON string, subOutbounds []any) map[string]any {
 	var tmpl map[string]any
 	json.Unmarshal([]byte(templateJSON), &tmpl)
 
-	proxyOutbound := buildOutbound(address, inbound.Port, inbound, client)
+	proxyTag := "proxy"
+	inboundTag := inbound.Tag
+	if inboundTag != "" {
+		proxyTag = inboundTag
+	}
+	proxyOutbound := buildOutbound(address, port, proxyTag, inbound, client)
 
 	cfg := make(map[string]any)
 
@@ -43,7 +87,7 @@ func buildClientConfig(host string, inbound *model.Inbound, client *model.Client
 		},
 	}
 
-		var outbounds []any
+	var outbounds []any
 	outbounds = append(outbounds, proxyOutbound)
 	if tmplOutbounds, ok := tmpl["outbounds"].([]any); ok {
 		for _, ob := range tmplOutbounds {
@@ -52,11 +96,22 @@ func buildClientConfig(host string, inbound *model.Inbound, client *model.Client
 				continue
 			}
 			tag, _ := obMap["tag"].(string)
-			if tag == "" || clientInboundTags[tag] || tag == "proxy" {
+			if tag == "" || serverInboundTags[tag] || tag == proxyTag || tag == "proxy" {
 				continue
 			}
 			outbounds = append(outbounds, ob)
 		}
+	}
+	for _, ob := range subOutbounds {
+		obMap, _ := ob.(map[string]any)
+		if obMap == nil {
+			continue
+		}
+		tag, _ := obMap["tag"].(string)
+		if tag == "" || tag == proxyTag || tag == "proxy" {
+			continue
+		}
+		outbounds = append(outbounds, ob)
 	}
 	cfg["outbounds"] = outbounds
 
@@ -75,7 +130,7 @@ func buildClientConfig(host string, inbound *model.Inbound, client *model.Client
 				inboundTags, _ := rMap["inboundTag"].([]any)
 				skip := false
 				for _, t := range inboundTags {
-					if tagStr, ok := t.(string); ok && clientInboundTags[tagStr] {
+					if tagStr, ok := t.(string); ok && serverInboundTags[tagStr] {
 						skip = true
 						break
 					}
@@ -92,7 +147,6 @@ func buildClientConfig(host string, inbound *model.Inbound, client *model.Client
 	} else {
 		cfg["routing"] = map[string]any{
 			"domainStrategy": "AsIs",
-			"rules":          rules,
 		}
 	}
 
@@ -117,9 +171,9 @@ func clientAddress(host string, inbound *model.Inbound) string {
 	return listen
 }
 
-func buildOutbound(address string, port int, inbound *model.Inbound, client *model.ClientRecord) map[string]any {
+func buildOutbound(address string, port int, tag string, inbound *model.Inbound, client *model.ClientRecord) map[string]any {
 	outbound := map[string]any{
-		"tag":      "proxy",
+		"tag":      tag,
 		"protocol": string(inbound.Protocol),
 		"settings": outboundSettings(address, port, inbound, client),
 	}
@@ -222,7 +276,7 @@ func outboundSettings(address string, port int, inbound *model.Inbound, client *
 		}
 
 	case model.WireGuard:
-		return wireGuardSettings(inbound, client)
+		return wireGuardSettings(inbound, client, address, port)
 
 	case model.Tunnel:
 		return map[string]any{
@@ -298,29 +352,60 @@ func parseStreamSettings(raw string) map[string]any {
 	return m
 }
 
-func wireGuardSettings(inbound *model.Inbound, client *model.ClientRecord) map[string]any {
+func wireGuardSettings(inbound *model.Inbound, client *model.ClientRecord, address string, port int) map[string]any {
 	var settings map[string]any
 	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
 		return map[string]any{}
 	}
 
+	clients, _ := settings["clients"].([]any)
+	privateKey := ""
+	for _, c := range clients {
+		cm, _ := c.(map[string]any)
+		if cm == nil {
+			continue
+		}
+		email, _ := cm["email"].(string)
+		if email == client.Email {
+			if pk, ok := cm["privateKey"].(string); ok {
+				privateKey = pk
+			}
+			break
+		}
+	}
+
 	serverInfo, _ := settings["server"].(map[string]any)
 	serverPubKey, _ := serverInfo["publicKey"].(string)
-	serverEndpoint, _ := serverInfo["endpoint"].(string)
-
-	secretKey := client.UUID
+	endpoint := serverInfo["endpoint"].(string)
+	if endpoint == "" {
+		endpoint = net.JoinHostPort(address, itoa(port))
+	}
 
 	return map[string]any{
-		"secretKey": secretKey,
+		"secretKey": privateKey,
 		"address":   []string{},
 		"peers": []any{
 			map[string]any{
 				"publicKey":  serverPubKey,
-				"endpoint":   serverEndpoint,
+				"endpoint":   endpoint,
 				"allowedIPs": []string{"0.0.0.0/0", "::/0"},
 			},
 		},
 	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }
 
 func cleanStreamSettings(ss map[string]any) {
