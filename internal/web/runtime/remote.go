@@ -18,6 +18,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/netsafe"
+	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
 const remoteHTTPTimeout = 10 * time.Second
@@ -42,6 +43,13 @@ type Remote struct {
 
 	mu            sync.RWMutex
 	remoteIDByTag map[string]int
+}
+
+type RemoteInboundOption struct {
+	Tag      string         `json:"tag"`
+	Remark   string         `json:"remark"`
+	Protocol model.Protocol `json:"protocol"`
+	Port     int            `json:"port"`
 }
 
 func NewRemote(n *model.Node) *Remote {
@@ -202,6 +210,18 @@ func (r *Remote) ListRemoteTags(ctx context.Context) ([]string, error) {
 		tags = append(tags, tag)
 	}
 	return tags, nil
+}
+
+func (r *Remote) ListInboundOptions(ctx context.Context) ([]RemoteInboundOption, error) {
+	env, err := r.do(ctx, http.MethodGet, "panel/api/inbounds/list", nil)
+	if err != nil {
+		return nil, err
+	}
+	var list []RemoteInboundOption
+	if err := json.Unmarshal(env.Obj, &list); err != nil {
+		return nil, fmt.Errorf("decode inbound list: %w", err)
+	}
+	return list, nil
 }
 
 func (r *Remote) refreshRemoteIDs(ctx context.Context) error {
@@ -452,10 +472,25 @@ func (r *Remote) FetchTrafficSnapshot(ctx context.Context) (*TrafficSnapshot, er
 	return snap, nil
 }
 
+// PushGlobalClientTraffics sends this panel's aggregated per-client usage to
+// the node, tagged with this panel's GUID so the node keeps one row per
+// pushing master. Display/enforcement input on the node only — the node never
+// folds these into the counters it reports back, so this panel's (and any
+// other master's) delta accounting over the node snapshot stays intact.
+func (r *Remote) PushGlobalClientTraffics(ctx context.Context, masterGuid string, traffics []*xray.ClientTraffic) error {
+	payload := map[string]any{
+		"masterGuid": masterGuid,
+		"traffics":   traffics,
+	}
+	_, err := r.do(ctx, http.MethodPost, "panel/api/inbounds/pushClientTraffics", payload)
+	return err
+}
+
 func wireInbound(ib *model.Inbound) url.Values {
 	v := url.Values{}
 	v.Set("total", strconv.FormatInt(ib.Total, 10))
 	v.Set("remark", ib.Remark)
+	v.Set("subSortIndex", strconv.Itoa(ib.SubSortIndex))
 	v.Set("enable", strconv.FormatBool(ib.Enable))
 	v.Set("expiryTime", strconv.FormatInt(ib.ExpiryTime, 10))
 	v.Set("listen", ib.Listen)
@@ -465,6 +500,14 @@ func wireInbound(ib *model.Inbound) url.Values {
 	v.Set("streamSettings", sanitizeStreamSettingsForRemote(ib.StreamSettings))
 	v.Set("tag", ib.Tag)
 	v.Set("sniffing", ib.Sniffing)
+	shareAddrStrategy := strings.TrimSpace(ib.ShareAddrStrategy)
+	switch shareAddrStrategy {
+	case "listen", "custom":
+	default:
+		shareAddrStrategy = "node"
+	}
+	v.Set("shareAddrStrategy", shareAddrStrategy)
+	v.Set("shareAddr", ib.ShareAddr)
 	if ib.TrafficReset != "" {
 		v.Set("trafficReset", ib.TrafficReset)
 	}

@@ -1332,8 +1332,25 @@
             "type": "string"
           },
           "settings": {},
+          "shareAddr": {
+            "type": "string"
+          },
+          "shareAddrStrategy": {
+            "enum": [
+              "node",
+              "listen",
+              "custom"
+            ],
+            "type": "string"
+          },
           "sniffing": {},
           "streamSettings": {},
+          "subSortIndex": {
+            "description": "1-based sort order of this inbound's links in subscription output only (lower first; ties by id)",
+            "example": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
           "tag": {
             "example": "in-443-tcp",
             "type": "string"
@@ -1370,8 +1387,11 @@
           "protocol",
           "remark",
           "settings",
+          "shareAddr",
+          "shareAddrStrategy",
           "sniffing",
           "streamSettings",
+          "subSortIndex",
           "tag",
           "total",
           "trafficReset",
@@ -1444,6 +1464,11 @@
         "properties": {
           "id": {
             "example": 1,
+            "type": "integer"
+          },
+          "nodeId": {
+            "description": "Hosting node; nil for this panel's own inbounds. Lets the clients\npage map a node filter onto inbound IDs (#4997).",
+            "nullable": true,
             "type": "integer"
           },
           "port": {
@@ -1559,6 +1584,19 @@
             "example": 5,
             "type": "integer"
           },
+          "inboundSyncMode": {
+            "enum": [
+              "all",
+              "selected"
+            ],
+            "type": "string"
+          },
+          "inboundTags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "lastError": {
             "type": "string"
           },
@@ -1662,6 +1700,8 @@
           "guid",
           "id",
           "inboundCount",
+          "inboundSyncMode",
+          "inboundTags",
           "lastError",
           "lastHeartbeat",
           "latencyMs",
@@ -2116,8 +2156,11 @@
                       "protocol": "vless",
                       "remark": "VLESS-443",
                       "settings": null,
+                      "shareAddr": "",
+                      "shareAddrStrategy": "node",
                       "sniffing": null,
                       "streamSettings": null,
+                      "subSortIndex": 1,
                       "tag": "in-443-tcp",
                       "total": 0,
                       "trafficReset": "never",
@@ -2214,6 +2257,7 @@
                   "obj": [
                     {
                       "id": 1,
+                      "nodeId": null,
                       "port": 443,
                       "protocol": "vless",
                       "remark": "VLESS-443",
@@ -2702,6 +2746,59 @@
                     },
                     "obj": {}
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/inbounds/pushClientTraffics": {
+      "post": {
+        "tags": [
+          "Inbounds"
+        ],
+        "summary": "Receive a master panel's aggregated per-client usage, keyed by the master's GUID. Stored in a side table used only for the UI display overlay and local quota enforcement — never folded into the local counters that masters poll, so delta accounting stays intact. Called panel-to-panel by the node traffic sync job.",
+        "operationId": "post_panel_api_inbounds_pushClientTraffics",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "masterGuid": "9f6c2d-…",
+                "traffics": [
+                  {
+                    "email": "alice",
+                    "up": 1048576,
+                    "down": 2097152
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                },
+                "example": {
+                  "success": true
                 }
               }
             }
@@ -5943,6 +6040,10 @@
                       "guid": "",
                       "id": 1,
                       "inboundCount": 5,
+                      "inboundSyncMode": "all",
+                      "inboundTags": [
+                        ""
+                      ],
                       "lastError": "",
                       "lastHeartbeat": 1700000000,
                       "latencyMs": 42,
@@ -6376,6 +6477,65 @@
                 "example": {
                   "success": true,
                   "obj": "k3b1...base64-sha256...="
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/nodes/inbounds": {
+      "post": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Use unsaved node connection details to list the remote inbounds available for selective import.",
+        "operationId": "post_panel_api_nodes_inbounds",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "name": "de-fra-1",
+                "scheme": "https",
+                "address": "node1.example.com",
+                "port": 2053,
+                "basePath": "/",
+                "apiToken": "abcdef..."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "obj": [
+                    {
+                      "tag": "inbound-443",
+                      "remark": "VLESS",
+                      "protocol": "vless",
+                      "port": 443
+                    }
+                  ]
                 }
               }
             }
@@ -7331,6 +7491,46 @@
         ],
         "summary": "Test an outbound configuration. Sends the outbound JSON (required), optionally all outbounds (to resolve sockopt.dialerProxy dependencies), and a mode flag.",
         "operationId": "post_panel_api_xray_testOutbound",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/xray/testOutbounds": {
+      "post": {
+        "tags": [
+          "Xray Settings"
+        ],
+        "summary": "Test a batch of outbounds (max 50) through one shared temp xray instance. Returns an array of results in input order, each with the outbound tag, delay, HTTP status and a connect/TLS/TTFB timing breakdown.",
+        "operationId": "post_panel_api_xray_testOutbounds",
         "requestBody": {
           "required": true,
           "content": {

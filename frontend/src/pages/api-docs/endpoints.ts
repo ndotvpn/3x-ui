@@ -206,6 +206,17 @@ export const sections: readonly Section[] = [
         ],
       },
       {
+        method: 'POST',
+        path: '/panel/api/inbounds/pushClientTraffics',
+        summary: 'Receive a master panel\'s aggregated per-client usage, keyed by the master\'s GUID. Stored in a side table used only for the UI display overlay and local quota enforcement — never folded into the local counters that masters poll, so delta accounting stays intact. Called panel-to-panel by the node traffic sync job.',
+        params: [
+          { name: 'masterGuid', in: 'body (json)', type: 'string', desc: 'Stable GUID of the pushing master panel.' },
+          { name: 'traffics', in: 'body (json)', type: 'object[]', desc: 'Client traffic rows; only email/up/down are read.' },
+        ],
+        body: '{\n  "masterGuid": "9f6c2d-…",\n  "traffics": [\n    { "email": "alice", "up": 1048576, "down": 2097152 }\n  ]\n}',
+        response: '{\n  "success": true\n}',
+      },
+      {
         method: 'GET',
         path: '/panel/api/inbounds/:id/fallbacks',
         summary: 'List the fallback rules attached to a master VLESS/Trojan TCP-TLS inbound. Each rule links one child inbound (the dest) to optional SNI/ALPN/path/dest/xver match criteria. When dest is empty the child inbound\'s listen+port is used.',
@@ -834,6 +845,13 @@ export const sections: readonly Section[] = [
       },
       {
         method: 'POST',
+        path: '/panel/api/nodes/inbounds',
+        summary: 'Use unsaved node connection details to list the remote inbounds available for selective import.',
+        body: '{\n  "name": "de-fra-1",\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/",\n  "apiToken": "abcdef..."\n}',
+        response: '{\n  "success": true,\n  "obj": [\n    { "tag": "inbound-443", "remark": "VLESS", "protocol": "vless", "port": 443 }\n  ]\n}',
+      },
+      {
+        method: 'POST',
         path: '/panel/api/nodes/probe/:id',
         summary: 'Probe an existing node, updating its cached health state.',
         params: [
@@ -1044,6 +1062,17 @@ export const sections: readonly Section[] = [
           { name: 'mode', in: 'body (form)', type: 'string', desc: '"tcp" for a fast dial-only probe (parallel-safe). Default/empty uses a full HTTP probe through a temp xray instance.' },
         ],
         body: 'outbound={"protocol":"freedom","settings":{}}&mode=tcp',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/xray/testOutbounds',
+        summary: 'Test a batch of outbounds (max 50) through one shared temp xray instance. Returns an array of results in input order, each with the outbound tag, delay, HTTP status and a connect/TLS/TTFB timing breakdown.',
+        params: [
+          { name: 'outbounds', in: 'body (form)', type: 'string', desc: 'JSON array of outbound configs to test (required).' },
+          { name: 'allOutbounds', in: 'body (form)', type: 'string', desc: 'JSON array of all outbounds — used to resolve dialerProxy chains.' },
+          { name: 'mode', in: 'body (form)', type: 'string', desc: '"tcp" for fast dial-only probes (UDP-transport outbounds are still probed over HTTP). Default/empty routes a real HTTP request through each outbound.' },
+        ],
+        body: 'outbounds=[{"tag":"direct","protocol":"freedom","settings":{}}]&mode=http',
       },
       {
         method: 'POST',
