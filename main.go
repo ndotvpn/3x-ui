@@ -265,7 +265,7 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 }
 
 // updateSetting updates various panel settings including port, credentials, base path, listen IP, and two-factor authentication.
-func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool) error {
+func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool, webDomain string, subDomain string) error {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println("Database initialization failed:", err)
@@ -319,6 +319,24 @@ func updateSetting(port int, username string, password string, webBasePath strin
 			fmt.Println("Failed to set listen IP:", err)
 		} else {
 			fmt.Printf("listen %v set successfully", listenIP)
+		}
+	}
+
+	if webDomain != "" {
+		err := settingService.SetWebDomain(webDomain)
+		if err != nil {
+			fmt.Println("Failed to set web domain:", err)
+		} else {
+			fmt.Printf("webDomain %v set successfully\n", webDomain)
+		}
+	}
+
+	if subDomain != "" {
+		err := settingService.SetSubDomain(subDomain)
+		if err != nil {
+			fmt.Println("Failed to set sub domain:", err)
+		} else {
+			fmt.Printf("subDomain %v set successfully\n", subDomain)
 		}
 	}
 
@@ -512,6 +530,8 @@ func main() {
 	var getCert bool
 	var getApiToken bool
 	var resetTwoFactor bool
+	var webDomain string
+	var subDomain string
 	settingCmd.BoolVar(&reset, "reset", false, "Reset all settings")
 	settingCmd.BoolVar(&show, "show", false, "Display current settings")
 	settingCmd.IntVar(&port, "port", 0, "Set panel port number")
@@ -520,6 +540,8 @@ func main() {
 	settingCmd.StringVar(&webBasePath, "webBasePath", "", "Set base path for Panel")
 	settingCmd.StringVar(&listenIP, "listenIP", "", "set panel listenIP IP")
 	settingCmd.BoolVar(&resetTwoFactor, "resetTwoFactor", false, "Reset two-factor authentication settings")
+	settingCmd.StringVar(&webDomain, "webDomain", "", "Set web domain for panel (used in client link generation)")
+	settingCmd.StringVar(&subDomain, "subDomain", "", "Set subscription domain for panel (used in client link generation)")
 	settingCmd.BoolVar(&getListen, "getListen", false, "Display current panel listenIP IP")
 	settingCmd.BoolVar(&getCert, "getCert", false, "Display current certificate settings")
 	settingCmd.BoolVar(&getApiToken, "getApiToken", false, "Display current API token")
@@ -602,7 +624,7 @@ func main() {
 				return
 			}
 		} else {
-			if err = updateSetting(port, username, password, webBasePath, listenIP, resetTwoFactor); err != nil {
+			if err = updateSetting(port, username, password, webBasePath, listenIP, resetTwoFactor, webDomain, subDomain); err != nil {
 				return
 			}
 		}

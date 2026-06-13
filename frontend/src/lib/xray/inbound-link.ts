@@ -806,7 +806,8 @@ function isLoopbackHost(host: string): boolean {
 // listen or node override still wins, since resolveAddr only reaches the
 // fallbackHostname after those.
 export function preferPublicHost(browserHost: string, publicHost: string): string {
-  return publicHost && isLoopbackHost(browserHost) ? publicHost : browserHost;
+  if (publicHost) return publicHost;
+  return browserHost;
 }
 
 // Returns the client array for protocols that have one. SS returns its

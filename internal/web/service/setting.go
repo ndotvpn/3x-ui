@@ -381,6 +381,10 @@ func (s *SettingService) GetWebDomain() (string, error) {
 	return s.getString("webDomain")
 }
 
+func (s *SettingService) SetWebDomain(domain string) error {
+	return s.setString("webDomain", domain)
+}
+
 func (s *SettingService) GetTgBotToken() (string, error) {
 	return s.getString("tgBotToken")
 }
@@ -672,6 +676,10 @@ func (s *SettingService) GetSubJsonPath() (string, error) {
 
 func (s *SettingService) GetSubDomain() (string, error) {
 	return s.getString("subDomain")
+}
+
+func (s *SettingService) SetSubDomain(domain string) error {
+	return s.setString("subDomain", domain)
 }
 
 func (s *SettingService) SetSubCertFile(subCertFile string) error {

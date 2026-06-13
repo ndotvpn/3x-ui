@@ -806,6 +806,37 @@ post_install() {
     systemctl start x-ui 2>/dev/null || true
     sleep 3
 
+    # Set webDomain to detected server IP so VLESS/VMess URIs always use
+    # the correct address regardless of how the panel is accessed (SSH tunnel,
+    # domain proxy, etc.). Uses the panel API — we GET all settings, merge in
+    # webDomain, then POST the full object back.
+    local api_token
+    api_token=$("${XUI_FOLDER}/x-ui" setting -getApiToken true 2>/dev/null | grep -Eo 'apiToken: .+' | awk '{print $2}')
+    if [[ -n "$api_token" && -n "$SERVER_IP" ]]; then
+        local cur_settings updated_settings
+        cur_settings=$(curl -s -X POST "http://127.0.0.1:2053/panel/api/setting/all" \
+            -H "Authorization: Bearer ${api_token}")
+        if updated_settings=$(echo "$cur_settings" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+if 'obj' in d:
+    d=d['obj']
+d['webDomain']='${SERVER_IP}'
+print(json.dumps(d))
+" 2>/dev/null); then
+            curl -s -X POST "http://127.0.0.1:2053/panel/api/setting/update" \
+                -H "Authorization: Bearer ${api_token}" \
+                -H "Content-Type: application/json" \
+                -d "$updated_settings" >/dev/null 2>&1 && \
+                info "webDomain set to ${SERVER_IP}" || \
+                warn "Could not set webDomain via API"
+        else
+            warn "Could not parse current settings to set webDomain"
+        fi
+    else
+        [[ -z "$api_token" ]] && warn "Could not retrieve API token to set webDomain"
+    fi
+
     setup_nginx "${DOMAIN}" "2053" "${web_path}"
     systemctl restart nginx 2>/dev/null || true
     info "nginx serving decoy at / and panel at /${web_path}/"
